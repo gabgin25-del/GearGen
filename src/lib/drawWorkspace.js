@@ -14,6 +14,21 @@ import {
 } from './splineMath.js'
 import { drawConstraintDecorations } from './constraintDraw.js'
 import { linearDistanceAnchorPoints } from './dimensionGeometry.js'
+import {
+  DEFAULT_DOCUMENT_UNITS,
+  formatLengthMmForDisplay,
+  worldMmToDisplay,
+} from './sketchUnits.js'
+
+function cartesianTickLabel(worldMm, step, tickFmt, docUnits) {
+  if (tickFmt === 'radians_pi') {
+    return formatAxisTickValue(worldMm, step, tickFmt)
+  }
+  if (!docUnits) return formatAxisTickValue(worldMm, step, tickFmt)
+  const d = worldMmToDisplay(worldMm, docUnits)
+  const ds = Math.max(1e-12, Math.abs(worldMmToDisplay(step, docUnits)))
+  return formatAxisTickValue(d, ds, 'decimal')
+}
 import { DRIVING_DIM_OFFSET_WORLD } from './dimensionHitTest.js'
 import {
   drawAngularDimension,
@@ -467,7 +482,8 @@ function drawAxes(
 ) {
   const z = zoom || 1
   const lw = Math.max(2, 2 / z)
-  const unit = labelOpts?.worldUnit ?? 'u'
+  const unit = labelOpts?.worldUnit ?? 'mm'
+  const docUnits = labelOpts?.documentUnits
   const showTicks = labelOpts?.showAxisTickValues !== false
   const showNames = labelOpts?.showAxisNameLabels !== false
   const tickFmt = labelOpts?.axisNumberFormat ?? 'decimal'
@@ -507,7 +523,7 @@ function drawAxes(
       ctx.moveTo(x, oy - tick)
       ctx.lineTo(x, oy + tick)
       ctx.stroke()
-      const lx = formatAxisTickValue(x, step, tickFmt)
+      const lx = cartesianTickLabel(x, step, tickFmt, docUnits)
       drawWorldText(ctx, x, oy, z, lx, {
         dy: 14,
         font: '11px Inter, system-ui, sans-serif',
@@ -525,7 +541,7 @@ function drawAxes(
       ctx.moveTo(ox - tick, y)
       ctx.lineTo(ox + tick, y)
       ctx.stroke()
-      const ly = formatAxisTickValue(y, step, tickFmt)
+      const ly = cartesianTickLabel(y, step, tickFmt, docUnits)
       drawWorldText(ctx, ox, y, z, ly, {
         dx: 14,
         font: '11px Inter, system-ui, sans-serif',
@@ -581,6 +597,7 @@ function drawAxes(
  *   selectedShape?: null | { kind: string; id: string }
  *   labelDrawOptions?: {
  *     worldUnit?: string
+ *     documentUnits?: import('./sketchUnits.js').DocumentUnits
  *     showAxisTickValues?: boolean
  *     showAxisNameLabels?: boolean
  *     axisNumberFormat?: 'decimal' | 'radians_pi'
@@ -893,7 +910,11 @@ export function drawWorkspaceScene(ctx, p) {
   }
 
   if (showDimensions) {
-    const unit = labelDrawOptions.worldUnit || 'u'
+    const unit = labelDrawOptions.worldUnit || 'mm'
+    const du =
+      labelDrawOptions.documentUnits != null
+        ? labelDrawOptions.documentUnits
+        : DEFAULT_DOCUMENT_UNITS
     for (const seg of segments) {
       const a = pointById.get(seg.a)
       const b = pointById.get(seg.b)
@@ -901,7 +922,7 @@ export function drawWorkspaceScene(ctx, p) {
       const len = Math.hypot(b.x - a.x, b.y - a.y)
       const mx = (a.x + b.x) / 2
       const my = (a.y + b.y) / 2
-      drawWorldText(ctx, mx, my, z, `${len.toFixed(1)} ${unit}`, {
+      drawWorldText(ctx, mx, my, z, `${formatLengthMmForDisplay(len, du, 1)} ${unit}`, {
         font: '10px Inter, system-ui, sans-serif',
         color: pal.tickText,
         align: 'center',
@@ -910,7 +931,7 @@ export function drawWorkspaceScene(ctx, p) {
       })
     }
     for (const c of resolvedCircles) {
-      const txt = `R ${c.r.toFixed(1)} ${unit}`
+      const txt = `R ${formatLengthMmForDisplay(c.r, du, 1)} ${unit}`
       drawWorldText(ctx, c.cx, c.cy, z, txt, {
         font: '10px Inter, system-ui, sans-serif',
         color: pal.tickText,
@@ -922,7 +943,11 @@ export function drawWorkspaceScene(ctx, p) {
   }
 
   if (dimensions.length > 0) {
-    const unit = labelDrawOptions.worldUnit || 'u'
+    const unit = labelDrawOptions.worldUnit || 'mm'
+    const du =
+      labelDrawOptions.documentUnits != null
+        ? labelDrawOptions.documentUnits
+        : DEFAULT_DOCUMENT_UNITS
     const showDeg = labelDrawOptions.showAngleDegrees !== false
     for (const dim of dimensions) {
       const v = dim.value
@@ -935,7 +960,7 @@ export function drawWorkspaceScene(ctx, p) {
         if (!anchors) continue
         const label =
           v != null && Number.isFinite(v)
-            ? `${v.toFixed(2)} ${unit}`
+            ? `${formatLengthMmForDisplay(v, du)} ${unit}`
             : `— ${unit}`
         drawLinearDimension(ctx, {
           ax: anchors.ax,
@@ -953,7 +978,7 @@ export function drawWorkspaceScene(ctx, p) {
         const rc = circleWithResolvedCenter(c, pointById)
         const label =
           v != null && Number.isFinite(v)
-            ? `R ${v.toFixed(2)} ${unit}`
+            ? `R ${formatLengthMmForDisplay(v, du)} ${unit}`
             : `R — ${unit}`
         drawRadialDimension(ctx, {
           cx: rc.cx,
@@ -969,7 +994,7 @@ export function drawWorkspaceScene(ctx, p) {
         const rc = circleWithResolvedCenter(c, pointById)
         const label =
           v != null && Number.isFinite(v)
-            ? `Ø ${v.toFixed(2)} ${unit}`
+            ? `Ø ${formatLengthMmForDisplay(v, du)} ${unit}`
             : `Ø — ${unit}`
         drawRadialDimension(ctx, {
           cx: rc.cx,

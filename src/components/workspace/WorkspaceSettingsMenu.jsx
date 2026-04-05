@@ -3,6 +3,11 @@ import { useEffect, useRef, useState } from 'react'
 import { CollapsibleSection } from '../ui/CollapsibleSection.jsx'
 import { ErrorBoundary } from '../ui/ErrorBoundary.jsx'
 import { inferDistanceKind } from '../../lib/dimensionGeometry.js'
+import {
+  formatLengthMmForDisplay,
+  UNIT_PRESET_OPTIONS,
+  worldMmToDisplay,
+} from '../../lib/sketchUnits.js'
 import { SPLINE_TYPE_OPTIONS } from '../../hooks/useWorkspaceScene.js'
 import { WorkspaceOptions } from './WorkspaceOptions.jsx'
 
@@ -60,7 +65,10 @@ export function WorkspaceSettingsMenu({
     originPickNextClick,
     setOriginPickNextClick,
     worldUnitLabel,
-    setWorldUnitLabel,
+    documentUnits,
+    setDocumentUnits,
+    circleTangentMode,
+    setCircleTangentMode,
     showAxisTickValues,
     setShowAxisTickValues,
     showAxisNameLabels,
@@ -244,14 +252,89 @@ export function WorkspaceSettingsMenu({
               >
                 <div className="flex flex-col gap-2">
                   <label className="flex max-w-full flex-col gap-0.5 text-[11px] text-gg-muted">
-                    World unit (axis titles)
-                    <input
-                      type="text"
-                      value={worldUnitLabel}
-                      onChange={(e) => setWorldUnitLabel(e.target.value)}
+                    Document units (stored geometry is always mm)
+                    <select
+                      value={documentUnits.preset}
+                      onChange={(e) => {
+                        const id = e.target.value
+                        if (!UNIT_PRESET_OPTIONS.some((o) => o.id === id)) return
+                        setDocumentUnits((d) => ({ ...d, preset: id }))
+                      }}
                       className="rounded border border-gg-border bg-gg-workspace px-2 py-1.5 text-[12px] text-gg-text"
-                      maxLength={12}
-                    />
+                    >
+                      {UNIT_PRESET_OPTIONS.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {documentUnits.preset === 'custom' ? (
+                    <>
+                      <label className="flex max-w-full flex-col gap-0.5 text-[11px] text-gg-muted">
+                        Custom label (axis & dimensions)
+                        <input
+                          type="text"
+                          value={documentUnits.customLabel ?? ''}
+                          onChange={(e) =>
+                            setDocumentUnits((d) => ({
+                              ...d,
+                              customLabel: e.target.value.slice(0, 12),
+                            }))
+                          }
+                          className="rounded border border-gg-border bg-gg-workspace px-2 py-1.5 text-[12px] text-gg-text"
+                          maxLength={12}
+                          placeholder="e.g. uu"
+                        />
+                      </label>
+                      <label className="flex max-w-full flex-col gap-0.5 text-[11px] text-gg-muted">
+                        Millimeters per 1 display unit
+                        <input
+                          type="number"
+                          step="any"
+                          min={1e-9}
+                          value={
+                            Number.isFinite(documentUnits.customMmPerUnit)
+                              ? String(documentUnits.customMmPerUnit)
+                              : '1'
+                          }
+                          onChange={(e) => {
+                            const v = Number.parseFloat(e.target.value)
+                            if (!Number.isFinite(v) || v <= 0) return
+                            setDocumentUnits((d) => ({
+                              ...d,
+                              customMmPerUnit: v,
+                            }))
+                          }}
+                          className="rounded border border-gg-border bg-gg-workspace px-2 py-1.5 text-[12px] text-gg-text"
+                        />
+                      </label>
+                      <p className="text-[10px] leading-snug text-gg-muted">
+                        Example: if 1 shown unit = 25.4 mm, enter 25.4 (inch-scale
+                        drawing without switching preset).
+                      </p>
+                    </>
+                  ) : null}
+                  <label className="flex max-w-full flex-col gap-0.5 text-[11px] text-gg-muted">
+                    Circle–circle tangent (new constraints)
+                    <select
+                      value={circleTangentMode}
+                      onChange={(e) =>
+                        setCircleTangentMode(
+                          e.target.value === 'internal'
+                            ? 'internal'
+                            : 'external',
+                        )
+                      }
+                      className="rounded border border-gg-border bg-gg-workspace px-2 py-1.5 text-[12px] text-gg-text"
+                    >
+                      <option value="external">
+                        External (centers separated by r₁ + r₂)
+                      </option>
+                      <option value="internal">
+                        Internal (|r₁ − r₂| between centers)
+                      </option>
+                    </select>
                   </label>
                   <label className="flex cursor-pointer items-center gap-2 text-[12px] text-gg-text">
                     <input
@@ -337,14 +420,33 @@ export function WorkspaceSettingsMenu({
                                 const v = dim.value
                                 const s =
                                   v != null && Number.isFinite(v)
-                                    ? v.toFixed(2)
+                                    ? formatLengthMmForDisplay(
+                                        v,
+                                        documentUnits,
+                                      )
                                     : '—'
-                                return `${pfx} · ${s} ${worldUnitLabel || 'u'}`
+                                return `${pfx} · ${s} ${worldUnitLabel || 'mm'}`
                               })()
                             : dim.type === 'radius'
-                              ? `Radius R · ${dim.value != null && Number.isFinite(dim.value) ? dim.value.toFixed(2) : '—'} ${worldUnitLabel || 'u'}`
+                              ? `Radius R · ${
+                                  dim.value != null &&
+                                  Number.isFinite(dim.value)
+                                    ? formatLengthMmForDisplay(
+                                        dim.value,
+                                        documentUnits,
+                                      )
+                                    : '—'
+                                } ${worldUnitLabel || 'mm'}`
                               : dim.type === 'diameter'
-                                ? `Diameter Ø · ${dim.value != null && Number.isFinite(dim.value) ? dim.value.toFixed(2) : '—'} ${worldUnitLabel || 'u'}`
+                                ? `Diameter Ø · ${
+                                    dim.value != null &&
+                                    Number.isFinite(dim.value)
+                                      ? formatLengthMmForDisplay(
+                                          dim.value,
+                                          documentUnits,
+                                        )
+                                      : '—'
+                                  } ${worldUnitLabel || 'mm'}`
                                 : showAngleDegrees
                                   ? `Angle · ${dim.value != null && Number.isFinite(dim.value) ? ((dim.value * 180) / Math.PI).toFixed(1) : '—'}°`
                                   : `Angle · ${dim.value != null && Number.isFinite(dim.value) ? dim.value.toFixed(3) : '—'} rad`}
@@ -353,7 +455,7 @@ export function WorkspaceSettingsMenu({
                           dim.type === 'radius' ||
                           dim.type === 'diameter') && (
                           <label className="flex flex-col gap-0.5 text-[11px] text-gg-muted">
-                            Value ({worldUnitLabel || 'u'})
+                            Value ({worldUnitLabel || 'mm'} display units)
                             <input
                               type="number"
                               step="any"
@@ -361,7 +463,12 @@ export function WorkspaceSettingsMenu({
                               className="rounded border border-gg-border bg-gg-workspace px-2 py-1 text-[12px] text-gg-text"
                               value={
                                 dim.value != null && Number.isFinite(dim.value)
-                                  ? String(dim.value)
+                                  ? String(
+                                      worldMmToDisplay(
+                                        dim.value,
+                                        documentUnits,
+                                      ),
+                                    )
                                   : ''
                               }
                               onChange={(e) =>

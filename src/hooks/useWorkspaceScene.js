@@ -7,6 +7,14 @@ import {
   useState,
 } from 'react'
 import { DEFAULT_GRID_STEP } from '../lib/gridSnap.js'
+import {
+  DEFAULT_DOCUMENT_UNITS,
+  displaySuffix,
+  displayToWorldMm,
+  UNIT_PRESET_OPTIONS,
+} from '../lib/sketchUnits.js'
+
+const VALID_UNIT_PRESETS = new Set(UNIT_PRESET_OPTIONS.map((o) => o.id))
 import { relationTargetsFromSelection } from '../lib/relationTargetsFromSelection.js'
 import { tryCommitConstraint } from '../lib/sketchConstraintQuality.js'
 import { computeSketchLockState } from '../lib/sketchLockState.js'
@@ -61,7 +69,7 @@ export const RELATION_TYPE_OPTIONS = [
     id: 'tangent',
     label: 'Tangent',
     description:
-      'Line tangent to a circle, circle tangent to circle, or colinear segments at a shared vertex.',
+      'Line tangent to circle or arc, circle–circle (external/internal in settings), or colinear segments at a shared vertex.',
   },
   {
     id: 'concentric',
@@ -117,6 +125,49 @@ function clampZoomValue(z) {
   return Math.min(2.5, Math.max(0.15, z))
 }
 
+const UNITS_STORAGE_KEY = 'geargen-document-units'
+const CIRCLE_TANGENT_STORAGE_KEY = 'geargen-circle-tangent-mode'
+
+function loadDocumentUnitsFromStorage() {
+  try {
+    const raw = globalThis.localStorage?.getItem(UNITS_STORAGE_KEY)
+    if (!raw) return { ...DEFAULT_DOCUMENT_UNITS }
+    const o = JSON.parse(raw)
+    if (o && typeof o === 'object') {
+      const mm = Number(o.customMmPerUnit)
+      const preset = VALID_UNIT_PRESETS.has(o.preset)
+        ? o.preset
+        : DEFAULT_DOCUMENT_UNITS.preset
+      return {
+        ...DEFAULT_DOCUMENT_UNITS,
+        ...o,
+        preset,
+        customMmPerUnit:
+          Number.isFinite(mm) && mm > 0
+            ? mm
+            : DEFAULT_DOCUMENT_UNITS.customMmPerUnit,
+        customLabel:
+          typeof o.customLabel === 'string'
+            ? o.customLabel
+            : DEFAULT_DOCUMENT_UNITS.customLabel,
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return { ...DEFAULT_DOCUMENT_UNITS }
+}
+
+function loadCircleTangentMode() {
+  try {
+    const v = globalThis.localStorage?.getItem(CIRCLE_TANGENT_STORAGE_KEY)
+    if (v === 'internal') return 'internal'
+  } catch {
+    /* ignore */
+  }
+  return 'external'
+}
+
 function hexToFillRgba(hex) {
   const h = (hex || '#3d8dd6').replace('#', '')
   if (h.length !== 6 || !/^[0-9a-fA-F]+$/.test(h)) {
@@ -169,7 +220,35 @@ export function useWorkspaceScene(options = {}) {
     useState(true)
   const [shapeFillHex, setShapeFillHex] = useState('#3d8dd6')
 
-  const [worldUnitLabel, setWorldUnitLabel] = useState('u')
+  const [documentUnits, setDocumentUnits] = useState(loadDocumentUnitsFromStorage)
+  const [circleTangentMode, setCircleTangentMode] = useState(loadCircleTangentMode)
+
+  useEffect(() => {
+    try {
+      globalThis.localStorage?.setItem(
+        UNITS_STORAGE_KEY,
+        JSON.stringify(documentUnits),
+      )
+    } catch {
+      /* ignore */
+    }
+  }, [documentUnits])
+
+  useEffect(() => {
+    try {
+      globalThis.localStorage?.setItem(
+        CIRCLE_TANGENT_STORAGE_KEY,
+        circleTangentMode,
+      )
+    } catch {
+      /* ignore */
+    }
+  }, [circleTangentMode])
+
+  const worldUnitLabel = useMemo(
+    () => displaySuffix(documentUnits),
+    [documentUnits],
+  )
   const [showAxisTickValues, setShowAxisTickValues] = useState(true)
   const [showAxisNameLabels, setShowAxisNameLabels] = useState(true)
   const [showAngleDegrees, setShowAngleDegrees] = useState(true)
@@ -290,13 +369,15 @@ export function useWorkspaceScene(options = {}) {
 
   const fixedSegmentLength = useMemo(() => {
     const v = parseFloat(fixedSegmentLengthInput)
-    return Number.isFinite(v) && v > 0 ? v : null
-  }, [fixedSegmentLengthInput])
+    if (!Number.isFinite(v) || v <= 0) return null
+    return displayToWorldMm(v, documentUnits)
+  }, [fixedSegmentLengthInput, documentUnits])
 
   const fixedCircleRadius = useMemo(() => {
     const v = parseFloat(fixedCircleRadiusInput)
-    return Number.isFinite(v) && v > 0 ? v : null
-  }, [fixedCircleRadiusInput])
+    if (!Number.isFinite(v) || v <= 0) return null
+    return displayToWorldMm(v, documentUnits)
+  }, [fixedCircleRadiusInput, documentUnits])
 
   const shapeFillRgba = useMemo(
     () => hexToFillRgba(shapeFillHex),
@@ -347,6 +428,7 @@ export function useWorkspaceScene(options = {}) {
   const labelDrawOptions = useMemo(
     () => ({
       worldUnit: worldUnitLabel,
+      documentUnits,
       showAxisTickValues,
       showAxisNameLabels,
       axisNumberFormat,
@@ -354,6 +436,7 @@ export function useWorkspaceScene(options = {}) {
     }),
     [
       worldUnitLabel,
+      documentUnits,
       showAxisTickValues,
       showAxisNameLabels,
       gridMode,
@@ -391,11 +474,19 @@ export function useWorkspaceScene(options = {}) {
         ...d,
         dimensions: (d.dimensions ?? []).map((dim) => {
           if (dim.id !== id) return dim
+          let store = v
+          if (
+            dim.type === 'distance' ||
+            dim.type === 'radius' ||
+            dim.type === 'diameter'
+          ) {
+            store = displayToWorldMm(v, documentUnits)
+          }
           if (
             (dim.type === 'distance' ||
               dim.type === 'radius' ||
               dim.type === 'diameter') &&
-            v <= 0
+            store <= 0
           ) {
             return dim
           }
@@ -405,11 +496,11 @@ export function useWorkspaceScene(options = {}) {
           ) {
             return dim
           }
-          return { ...dim, value: v }
+          return { ...dim, value: store }
         }),
       }))
     },
-    [commit],
+    [commit, documentUnits],
   )
 
   const sketchLockState = useMemo(() => computeSketchLockState(data), [data])
@@ -436,6 +527,13 @@ export function useWorkspaceScene(options = {}) {
         return
       }
       let newCo = { id: nextId('co'), type, targets }
+      if (
+        type === 'tangent' &&
+        targets[0]?.kind === 'circle' &&
+        targets[1]?.kind === 'circle'
+      ) {
+        newCo = { ...newCo, circleTangentMode }
+      }
       if (type === 'similar' && targets.length === 2) {
         const segLen = (sid) => {
           const seg = data.segments.find((s) => s.id === sid)
@@ -469,7 +567,7 @@ export function useWorkspaceScene(options = {}) {
       commit(() => result.data)
       setSketchSelection([])
     },
-    [sketchSelection, commit, nextId, data, onSketchMessage],
+    [sketchSelection, commit, nextId, data, onSketchMessage, circleTangentMode],
   )
 
   const loadWorkspaceSnapshot = useCallback(
@@ -625,7 +723,10 @@ export function useWorkspaceScene(options = {}) {
     setShapeFillHex,
     workspaceData: data,
     worldUnitLabel,
-    setWorldUnitLabel,
+    documentUnits,
+    setDocumentUnits,
+    circleTangentMode,
+    setCircleTangentMode,
     showAxisTickValues,
     setShowAxisTickValues,
     showAxisNameLabels,

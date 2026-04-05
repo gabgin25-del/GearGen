@@ -36,6 +36,11 @@ export function circlePrimitiveId(circleId) {
   return `ci:${circleId}`
 }
 
+/** @param {string} arcId */
+export function arcPrimitiveId(arcId) {
+  return `ar:${arcId}`
+}
+
 /**
  * @param {object} data workspace
  * @returns {object[] | null} primitives + params, or null to use legacy solver
@@ -47,6 +52,7 @@ export function buildPlaneGcsPrimitives(data) {
   const points = data.points ?? []
   const segments = data.segments ?? []
   const circles = data.circles ?? []
+  const arcs = data.arcs ?? []
   const dimensions = data.dimensions ?? []
 
   const pmap = new Map(points.map((p) => [p.id, p]))
@@ -120,6 +126,31 @@ export function buildPlaneGcsPrimitives(data) {
       type: 'circle',
       c_id: cpt,
       radius: rc.r,
+    })
+  }
+
+  for (const a of arcs) {
+    if (!a.centerId || !a.startId || !a.endId) continue
+    if (!pmap.has(a.centerId) || !pmap.has(a.startId) || !pmap.has(a.endId)) {
+      continue
+    }
+    const C = pmap.get(a.centerId)
+    const A = pmap.get(a.startId)
+    const B = pmap.get(a.endId)
+    if (!C || !A || !B) continue
+    const r = Math.hypot(A.x - C.x, A.y - C.y)
+    if (r < 1e-9) continue
+    const start_angle = Math.atan2(A.y - C.y, A.x - C.x)
+    const end_angle = Math.atan2(B.y - C.y, B.x - C.x)
+    out.push({
+      id: arcPrimitiveId(a.id),
+      type: 'arc',
+      c_id: a.centerId,
+      start_id: a.startId,
+      end_id: a.endId,
+      start_angle,
+      end_angle,
+      radius: r,
     })
   }
 
@@ -364,6 +395,21 @@ export function buildPlaneGcsPrimitives(data) {
         type: 'tangent_lc',
         l_id: linePrimitiveId(t[0].id),
         c_id: circlePrimitiveId(t[1].id),
+      })
+      continue
+    }
+
+    if (
+      c.type === 'tangent' &&
+      t.length === 2 &&
+      t[0].kind === 'segment' &&
+      t[1].kind === 'arc'
+    ) {
+      out.push({
+        id: nextCid('tan_la'),
+        type: 'tangent_la',
+        l_id: linePrimitiveId(t[0].id),
+        a_id: arcPrimitiveId(t[1].id),
       })
       continue
     }

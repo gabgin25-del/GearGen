@@ -264,7 +264,38 @@ export function constraintSatisfied(data, c) {
     const rc0 = circleWithResolvedCenter(c0, m)
     const rc1 = circleWithResolvedCenter(c1, m)
     const dcent = Math.hypot(rc1.cx - rc0.cx, rc1.cy - rc0.cy)
-    return Math.abs(dcent - (rc0.r + rc1.r)) <= LEN_TOL
+    const internal = c.circleTangentMode === 'internal'
+    const want = internal
+      ? Math.abs(rc0.r - rc1.r)
+      : rc0.r + rc1.r
+    return Math.abs(dcent - want) <= LEN_TOL
+  }
+
+  if (
+    t === 'tangent' &&
+    targets.length === 2 &&
+    targets[0].kind === 'segment' &&
+    targets[1].kind === 'arc'
+  ) {
+    const ep = segEndpoints(data, targets[0].id)
+    const arc = data.arcs?.find((x) => x.id === targets[1].id)
+    if (!ep || !arc?.centerId) return false
+    const m = ptMap(data)
+    const pC = m.get(arc.centerId)
+    const pA = arc.startId ? m.get(arc.startId) : null
+    if (!pC || !pA) return false
+    const r = Math.hypot(pA.x - pC.x, pA.y - pC.y)
+    if (r < 1e-9) return false
+    const dx = ep.pb.x - ep.pa.x
+    const dy = ep.pb.y - ep.pa.y
+    const L = Math.hypot(dx, dy)
+    if (L < 1e-9) return false
+    const nx = -dy / L
+    const ny = dx / L
+    const dist = Math.abs(
+      (pC.x - ep.pa.x) * nx + (pC.y - ep.pa.y) * ny,
+    )
+    return Math.abs(dist - r) <= LEN_TOL
   }
 
   if (
@@ -366,6 +397,14 @@ function sameConstraintTargets(a, b) {
     ) {
       return [t[1], t[0]]
     }
+    if (
+      a.type === 'tangent' &&
+      t.length === 2 &&
+      t[0].kind === 'arc' &&
+      t[1].kind === 'segment'
+    ) {
+      return [t[1], t[0]]
+    }
     return t
   }
   const taN = norm(ta)
@@ -373,6 +412,15 @@ function sameConstraintTargets(a, b) {
   const ka = taN.map((x) => `${x.kind}:${x.id}`).sort()
   const kb = tbN.map((x) => `${x.kind}:${x.id}`).sort()
   if (!ka.every((s, i) => s === kb[i])) return false
+  if (
+    a.type === 'tangent' &&
+    taN[0]?.kind === 'circle' &&
+    taN[1]?.kind === 'circle'
+  ) {
+    const ma = a.circleTangentMode === 'internal' ? 'internal' : 'external'
+    const mb = b.circleTangentMode === 'internal' ? 'internal' : 'external'
+    if (ma !== mb) return false
+  }
   if (a.type === 'similar') {
     const ra = a.ratio
     const rb = b.ratio

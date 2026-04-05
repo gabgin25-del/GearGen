@@ -14,6 +14,7 @@ export function relationTargetsFromSelection(type, selection, data) {
   const segs = selection.filter((s) => s.kind === 'segment')
   const pts = selection.filter((s) => s.kind === 'point')
   const circs = selection.filter((s) => s.kind === 'circle')
+  const arcs = selection.filter((s) => s.kind === 'arc')
   const polys = selection.filter((s) => s.kind === 'polygon')
 
   function firstBoundarySegId(polyId) {
@@ -86,6 +87,12 @@ export function relationTargetsFromSelection(type, selection, data) {
         return [
           { kind: 'circle', id: circs[0].id },
           { kind: 'circle', id: circs[1].id },
+        ]
+      }
+      if (segs.length >= 1 && arcs.length >= 1) {
+        return [
+          { kind: 'segment', id: segs[0].id },
+          { kind: 'arc', id: arcs[0].id },
         ]
       }
       if (segs.length >= 1 && circs.length >= 1) {

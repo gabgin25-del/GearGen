@@ -49,6 +49,11 @@ import {
   resolveDimensionFromTwoPicks,
 } from '../../lib/dimensionPick.js'
 import { hitDrivingDimension } from '../../lib/dimensionHitTest.js'
+import {
+  DEFAULT_DOCUMENT_UNITS,
+  formatLengthMmForDisplay,
+  worldMmToDisplay,
+} from '../../lib/sketchUnits.js'
 import { sampleSplinePolyline } from '../../lib/splineMath.js'
 import {
   circleRadiusFromCursor,
@@ -413,6 +418,30 @@ export function WorkspaceCanvas({
   const sketchSelectionRef = useRef(sketchSelection)
   const sketchLockStateRef = useRef(sketchLockState)
   const labelDrawOptionsRef = useRef(labelDrawOptions)
+  const drivingDimEditDraft = useCallback(
+    (dim) => {
+      const showDeg = labelDrawOptions?.showAngleDegrees !== false
+      const editInDegrees = dim.type === 'angle' && showDeg
+      const du =
+        labelDrawOptions?.documentUnits ?? DEFAULT_DOCUMENT_UNITS
+      let draft = ''
+      if (dim.value != null && Number.isFinite(dim.value)) {
+        if (editInDegrees) {
+          draft = String((dim.value * 180) / Math.PI)
+        } else if (
+          dim.type === 'distance' ||
+          dim.type === 'radius' ||
+          dim.type === 'diameter'
+        ) {
+          draft = String(worldMmToDisplay(dim.value, du))
+        } else {
+          draft = String(dim.value)
+        }
+      }
+      return { draft, editInDegrees }
+    },
+    [labelDrawOptions],
+  )
   /** @type {React.MutableRefObject<null | { phase: string; [k: string]: unknown }>} */
   const dimPlacementRef = useRef(null)
   const { ref: containerRef, size } = useElementSize()
@@ -583,14 +612,7 @@ export function WorkspaceCanvas({
       }
       const rect = containerRef.current?.getBoundingClientRect()
       if (!rect) return
-      const showDeg = labelDrawOptions?.showAngleDegrees !== false
-      const editInDegrees = dim.type === 'angle' && showDeg
-      let draft = ''
-      if (dim.value != null && Number.isFinite(dim.value)) {
-        draft = editInDegrees
-          ? String((dim.value * 180) / Math.PI)
-          : String(dim.value)
-      }
+      const { draft, editInDegrees } = drivingDimEditDraft(dim)
       setDimEdit({
         id: dimPickId,
         dimType: dim.type,
@@ -600,7 +622,7 @@ export function WorkspaceCanvas({
         draft,
       })
     },
-    [tool, setDrivingDimensionValue, labelDrawOptions],
+    [tool, setDrivingDimensionValue, drivingDimEditDraft],
   )
 
   const commitDimEdit = useCallback(() => {
@@ -1081,14 +1103,7 @@ export function WorkspaceCanvas({
             ) {
               const rect = containerRef.current?.getBoundingClientRect()
               if (rect) {
-                const showDeg = labelDrawOptions?.showAngleDegrees !== false
-                const editInDegrees = dim.type === 'angle' && showDeg
-                let draft = ''
-                if (dim.value != null && Number.isFinite(dim.value)) {
-                  draft = editInDegrees
-                    ? String((dim.value * 180) / Math.PI)
-                    : String(dim.value)
-                }
+                const { draft, editInDegrees } = drivingDimEditDraft(dim)
                 setDimEdit({
                   id: dimPickId,
                   dimType: dim.type,
@@ -1385,14 +1400,7 @@ export function WorkspaceCanvas({
             ) {
               const rect = containerRef.current?.getBoundingClientRect()
               if (rect) {
-                const showDeg = labelDrawOptions?.showAngleDegrees !== false
-                const editInDegrees = dim.type === 'angle' && showDeg
-                let draft = ''
-                if (dim.value != null && Number.isFinite(dim.value)) {
-                  draft = editInDegrees
-                    ? String((dim.value * 180) / Math.PI)
-                    : String(dim.value)
-                }
+                const { draft, editInDegrees } = drivingDimEditDraft(dim)
                 setDimEdit({
                   id: dimPickId,
                   dimType: dim.type,
@@ -2407,7 +2415,7 @@ export function WorkspaceCanvas({
       replaceSketchSelection,
       unionSketchSelection,
       setDimEdit,
-      labelDrawOptions,
+      drivingDimEditDraft,
     ],
   )
 
@@ -2598,8 +2606,10 @@ export function WorkspaceCanvas({
         if (pl?.phase === 'place') {
           const wx = (lx - p.x) / opt.zoom
           const wy = (ly - p.y) / opt.zoom
-          const unit = labelDrawOptionsRef.current?.worldUnit ?? 'u'
-          const showDeg = labelDrawOptionsRef.current?.showAngleDegrees !== false
+          const ldo = labelDrawOptionsRef.current
+          const du = ldo?.documentUnits ?? DEFAULT_DOCUMENT_UNITS
+          const unit = ldo?.worldUnit ?? 'mm'
+          const showDeg = ldo?.showAngleDegrees !== false
           const z = opt.zoom
           if (pl.dimType === 'distance' && pl.ax != null) {
             const off = linearDimensionOffsetFromCursor(
@@ -2617,7 +2627,7 @@ export function WorkspaceCanvas({
               bx: pl.bx,
               by: pl.by,
               offsetWorld: off,
-              label: `${Number(pl.value).toFixed(2)} ${unit}`,
+              label: `${formatLengthMmForDisplay(pl.value, du)} ${unit}`,
             })
           } else if (pl.dimType === 'angle' && pl.a0 != null) {
             const r = Math.max(12 / z, Math.hypot(wx - pl.vx, wy - pl.vy))
@@ -2639,7 +2649,7 @@ export function WorkspaceCanvas({
               cx: pl.cx,
               cy: pl.cy,
               r: pl.r,
-              label: `R ${Number(pl.value).toFixed(2)} ${unit}`,
+              label: `R ${formatLengthMmForDisplay(pl.value, du)} ${unit}`,
             })
           }
         }

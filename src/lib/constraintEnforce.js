@@ -362,6 +362,38 @@ export function applyConstraintEnforcement(data, constraint) {
   if (
     t === 'tangent' &&
     targets.length === 2 &&
+    targets[0].kind === 'segment' &&
+    targets[1].kind === 'arc'
+  ) {
+    const e0 = segEndpoints(data, targets[0].id)
+    const arc = data.arcs?.find((x) => x.id === targets[1].id)
+    if (!e0 || !arc?.centerId) return recomputeBoundArcs(data)
+    const ptMap = new Map(data.points.map((p) => [p.id, p]))
+    const pC = ptMap.get(arc.centerId)
+    const pA = arc.startId ? ptMap.get(arc.startId) : null
+    if (!pC || !pA) return recomputeBoundArcs(data)
+    const r = Math.hypot(pA.x - pC.x, pA.y - pC.y)
+    if (r < 1e-9) return recomputeBoundArcs(data)
+    const pr = pointLineSignedDist(
+      pC.x,
+      pC.y,
+      e0.pa.x,
+      e0.pa.y,
+      e0.pb.x,
+      e0.pb.y,
+    )
+    if (!pr) return recomputeBoundArcs(data)
+    const { dist, nx, ny } = pr
+    const sign = Math.abs(dist) < 1e-9 ? 1 : Math.sign(dist)
+    const targetDist = sign * r
+    const ncx = pC.x + nx * (targetDist - dist)
+    const ncy = pC.y + ny * (targetDist - dist)
+    return recomputeBoundArcs(movePoint(data, arc.centerId, ncx, ncy))
+  }
+
+  if (
+    t === 'tangent' &&
+    targets.length === 2 &&
     targets[0].kind === 'circle' &&
     targets[1].kind === 'circle'
   ) {
@@ -383,7 +415,8 @@ export function applyConstraintEnforcement(data, constraint) {
     if (d < 1e-9) return recomputeBoundArcs(data)
     const ux = dx / d
     const uy = dy / d
-    const want = r0 + r1
+    const internal = constraint.circleTangentMode === 'internal'
+    const want = internal ? Math.abs(r0 - r1) : r0 + r1
     const ncx = x0 + ux * want
     const ncy = y0 + uy * want
     return recomputeBoundArcs(moveCircleCenterTo(data, c1.id, ncx, ncy))

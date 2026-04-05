@@ -1,4 +1,5 @@
-export const DEFAULT_GRID_STEP = 20
+/** Default grid step in sketch units (millimeters). */
+export const DEFAULT_GRID_STEP = 10
 
 /**
  * Snap world coordinates to a square grid when enabled.
