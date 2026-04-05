@@ -23,22 +23,20 @@ export function solveWithPlaneGcs(data) {
   if (!w) return null
   if (!(data.points?.length > 0)) return null
 
-  const primitives = buildPlaneGcsPrimitives(data)
+  let workData = data
+  let primitives = buildPlaneGcsPrimitives(workData)
   if (primitives == null) return null
 
-  try {
+  const runOnce = () => {
     w.clear_data()
     w.set_max_iterations(120)
     w.set_convergence_threshold(1e-9)
     w.push_primitives_and_params(primitives)
-    const status = w.solve(Algorithm.DogLeg)
+    return w.solve(Algorithm.DogLeg)
+  }
 
-    const conflicting = w.has_gcs_conflicting_constraints()
-      ? w.get_gcs_conflicting_constraints()
-      : []
-    const redundant = w.has_gcs_redundant_constraints()
-      ? w.get_gcs_redundant_constraints()
-      : []
+  try {
+    let status = runOnce()
 
     let dof = 0
     try {
@@ -47,23 +45,64 @@ export function solveWithPlaneGcs(data) {
       dof = -1
     }
 
-    const okSolve =
+    let okSolve =
       status === SolveStatus.Success ||
       status === SolveStatus.Converged ||
       status === SolveStatus.SuccessfulSolutionInvalid
 
-    const overConstrained = conflicting.length > 0
-    const partiallyRedundant = w.has_gcs_partially_redundant_constraints()
+    let overConstrained =
+      (w.has_gcs_conflicting_constraints()
+        ? w.get_gcs_conflicting_constraints()
+        : []
+      ).length > 0
+
+    if (!okSolve || overConstrained) {
+      const relaxed = relaxAllConstraints(cloneWorkspaceData(data), 48)
+      const prim2 = buildPlaneGcsPrimitives(relaxed)
+      if (prim2 != null) {
+        primitives = prim2
+        workData = relaxed
+        status = runOnce()
+        const c2 = w.has_gcs_conflicting_constraints()
+          ? w.get_gcs_conflicting_constraints()
+          : []
+        const ok2 =
+          status === SolveStatus.Success ||
+          status === SolveStatus.Converged ||
+          status === SolveStatus.SuccessfulSolutionInvalid
+        if (ok2 && c2.length === 0) {
+          okSolve = true
+          overConstrained = false
+          try {
+            dof = w.gcs.dof()
+          } catch {
+            dof = -1
+          }
+        }
+      }
+    }
 
     if (!okSolve) {
+      const cFail = w.has_gcs_conflicting_constraints()
+        ? w.get_gcs_conflicting_constraints()
+        : []
+      const rFail = w.has_gcs_redundant_constraints()
+        ? w.get_gcs_redundant_constraints()
+        : []
+      let dofFail = dof
+      try {
+        dofFail = w.gcs.dof()
+      } catch {
+        dofFail = -1
+      }
       const next = cloneWorkspaceData(data)
       next.solverDiagnostics = {
         engine: 'planegcs',
         solveStatus: status,
-        dof,
-        overConstrained,
-        conflictingConstraintIds: conflicting,
-        redundantConstraintIds: redundant,
+        dof: dofFail,
+        overConstrained: cFail.length > 0,
+        conflictingConstraintIds: cFail,
+        redundantConstraintIds: rFail,
         fullyDefined: false,
         solveFailed: true,
       }
@@ -72,11 +111,26 @@ export function solveWithPlaneGcs(data) {
 
     w.apply_solution()
 
+    const conflictingFinal = w.has_gcs_conflicting_constraints()
+      ? w.get_gcs_conflicting_constraints()
+      : []
+    const redundantFinal = w.has_gcs_redundant_constraints()
+      ? w.get_gcs_redundant_constraints()
+      : []
+    let dofFinal = 0
+    try {
+      dofFinal = w.gcs.dof()
+    } catch {
+      dofFinal = -1
+    }
+    const overConstrainedFinal = conflictingFinal.length > 0
+    const partiallyRedundantFinal = w.has_gcs_partially_redundant_constraints()
+
     const primMap = new Map(
       w.sketch_index.get_primitives().map((p) => [p.id, p]),
     )
 
-    let next = cloneWorkspaceData(data)
+    let next = cloneWorkspaceData(workData)
     next.points = next.points.map((pt) => {
       const solved = primMap.get(pt.id)
       if (solved && solved.type === 'point') {
@@ -105,15 +159,15 @@ export function solveWithPlaneGcs(data) {
     next = recomputeBoundArcs(next)
 
     const fullyDefined =
-      !overConstrained && dof === 0 && !partiallyRedundant
+      !overConstrainedFinal && dofFinal === 0 && !partiallyRedundantFinal
 
     next.solverDiagnostics = {
       engine: 'planegcs',
       solveStatus: status,
-      dof,
-      overConstrained,
-      conflictingConstraintIds: conflicting,
-      redundantConstraintIds: redundant,
+      dof: dofFinal,
+      overConstrained: overConstrainedFinal,
+      conflictingConstraintIds: conflictingFinal,
+      redundantConstraintIds: redundantFinal,
       fullyDefined,
       solveFailed: false,
     }

@@ -180,6 +180,8 @@ export function AppShell() {
               splineSegmentsPerSpan={scene.splineSegmentsPerSpan}
               onSplineSegmentsPerSpanChange={scene.setSplineSegmentsPerSpan}
               splinePanelOpen={scene.splinePanelOpen}
+              cutMode={scene.cutMode}
+              onCutModeChange={scene.setCutMode}
             />
           </>
         ) : (
@@ -336,6 +338,7 @@ export function AppShell() {
           unionSketchSelection={scene.unionSketchSelection}
           setTool={scene.setTool}
           setDrivingDimensionValue={scene.setDrivingDimensionValue}
+          cutMode={scene.cutMode}
           allowRegionFill={scene.allowRegionFill}
           sketchLockState={scene.sketchLockState}
           theme={theme}

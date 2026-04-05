@@ -264,6 +264,7 @@ export function useWorkspaceScene(options = {}) {
   const [showAngleDegrees, setShowAngleDegrees] = useState(true)
   const [showDimensions, setShowDimensions] = useState(false)
   const [showRelations, setShowRelations] = useState(true)
+  const [cutMode, setCutMode] = useState(false)
   const [splinePanelOpen, setSplinePanelOpen] = useState(true)
   const [ribbonSectionsOpen, setRibbonSectionsOpen] = useState({
     sketch: true,
@@ -562,22 +563,33 @@ export function useWorkspaceScene(options = {}) {
         newCo = { ...newCo, ratio: L1 / L0 }
       }
       const result = tryCommitConstraint(data, newCo)
-      if (!result.ok) {
-        if (result.reason === 'redundant') {
-          onSketchMessage?.(
-            'That constraint is redundant — it already exists or is implied.',
-          )
-        } else {
-          onSketchMessage?.(
-            'That would over-constrain the sketch — no change applied.',
-          )
-        }
+      if (result.ok) {
+        commit(() => result.data)
+        setSketchSelection([])
         return
       }
-      commit(() => result.data)
-      setSketchSelection([])
+      if (result.reason === 'needSolver') {
+        checkpoint()
+        commit((d) => ({
+          ...d,
+          constraints: [...(d.constraints ?? []), newCo],
+        }))
+        setSketchSelection([])
+        return
+      }
+      onSketchMessage?.(
+        'That would over-constrain the sketch — no change applied.',
+      )
     },
-    [sketchSelection, commit, nextId, data, onSketchMessage, circleTangentMode],
+    [
+      sketchSelection,
+      commit,
+      checkpoint,
+      nextId,
+      data,
+      onSketchMessage,
+      circleTangentMode,
+    ],
   )
 
   const loadWorkspaceSnapshot = useCallback(
@@ -747,6 +759,8 @@ export function useWorkspaceScene(options = {}) {
     setShowDimensions,
     showRelations,
     setShowRelations,
+    cutMode,
+    setCutMode,
     splinePanelOpen,
     setSplinePanelOpen,
     ribbonSectionsOpen,

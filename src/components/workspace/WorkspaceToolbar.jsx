@@ -14,6 +14,7 @@ import {
   Pencil,
   Redo2,
   Ruler,
+  Scissors,
   Trash2,
   Undo2,
 } from 'lucide-react'
@@ -174,6 +175,8 @@ export function WorkspaceToolbar({
   splineSegmentsPerSpan,
   onSplineSegmentsPerSpanChange,
   splinePanelOpen,
+  cutMode,
+  onCutModeChange,
 }) {
   const sections = ribbonSectionsOpen ?? {
     sketch: true,
@@ -199,6 +202,25 @@ export function WorkspaceToolbar({
                 onToolChange={onToolChange}
               />
             ))}
+            {onCutModeChange ? (
+              <>
+                <GroupDivider />
+                <button
+                  type="button"
+                  title="Cut mode — complete a circle or rectangle over a filled region to punch a hole (even-odd fill)"
+                  aria-pressed={!!cutMode}
+                  onClick={() => onCutModeChange(!cutMode)}
+                  className={[
+                    'flex size-9 shrink-0 items-center justify-center rounded-md transition-colors',
+                    cutMode
+                      ? 'bg-amber-500/25 text-amber-200 shadow-sm'
+                      : 'text-gg-muted hover:bg-gg-sidebar-hover hover:text-gg-text',
+                  ].join(' ')}
+                >
+                  <Scissors className="size-4" strokeWidth={1.75} aria-hidden />
+                </button>
+              </>
+            ) : null}
           </RibbonSection>
           <RibbonSection
             sectionKey="curves"

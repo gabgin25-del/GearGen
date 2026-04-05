@@ -13,7 +13,8 @@
     "@salusoft89/planegcs": "^1.1.7",
     "lucide-react": "^1.7.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-draggable": "^4.5.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

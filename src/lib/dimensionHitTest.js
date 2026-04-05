@@ -1,24 +1,22 @@
 import { circleWithResolvedCenter } from './circleResolve.js'
 import { linearDistanceAnchorPoints } from './dimensionGeometry.js'
-import { ANSI_EXT_GAP_WORLD } from './DimensionRenderer.js'
+import { distPointToSegment } from './hitTest.js'
+import { radialLeaderGeometry } from './DimensionRenderer.js'
 
 /** Default offset of dimension line from measured chord (world). */
 export const DRIVING_DIM_OFFSET_WORLD = 24
 
-const ARROW_LEN = 9
-
-function radialLeaderLabelWorld(rc, zoom, leaderAngle) {
+function radialLeaderLabelWorld(rc, zoom, leaderAngle, leaderShoulderWorld) {
   const z = zoom || 1
   const { cx, cy, r } = rc
-  const ca = Math.cos(leaderAngle)
-  const sa = Math.sin(leaderAngle)
-  const gap = ANSI_EXT_GAP_WORLD
-  const pOut = { x: cx + ca * (r + gap), y: cy + sa * (r + gap) }
-  const radStub = 14 / z
-  const pBend = { x: pOut.x + ca * radStub, y: pOut.y + sa * radStub }
-  const shoulder = 42 / z
-  const hSign = ca >= 0 ? 1 : -1
-  const pLand = { x: pBend.x + hSign * shoulder, y: pBend.y }
+  const { pBend, pLand } = radialLeaderGeometry({
+    cx,
+    cy,
+    r,
+    zoom,
+    leaderAngle,
+    leaderShoulderWorld,
+  })
   return {
     x: (pBend.x + pLand.x) / 2,
     y: pLand.y - 6 / z,
@@ -78,7 +76,7 @@ export function drivingDimensionLabelWorld(dim, data, zoom) {
     const rc = circleWithResolvedCenter(shape, pointById)
     if (rc.r < 1e-9) return null
     const la = dim.leaderAngle ?? 0
-    return radialLeaderLabelWorld(rc, zoom, la)
+    return radialLeaderLabelWorld(rc, zoom, la, dim.leaderShoulderWorld)
   }
 
   if (dim.type === 'angle' && dim.targets?.length === 3) {
@@ -144,6 +142,52 @@ export function drivingDimensionLabelWorld(dim, data, zoom) {
  * @param {number} zoom
  * @returns {string | null} dimension id
  */
+/**
+ * Hit the horizontal shoulder segment (Ø / R landing). Prefer this over angular leader drag.
+ * @returns {string | null}
+ */
+export function hitRadialDimensionShoulder(wx, wy, data, tolWorld, zoom) {
+  const z = zoom || 1
+  const tol = Math.max(tolWorld, 5 / z)
+  const dims = data.dimensions ?? []
+  const pointById = new Map((data.points ?? []).map((p) => [p.id, p]))
+  const circles = data.circles ?? []
+  const arcs = data.arcs ?? []
+  let bestId = null
+  let bestD = Infinity
+  for (const dim of dims) {
+    if (dim.type !== 'radius' && dim.type !== 'diameter') continue
+    const tid = dim.targets?.[0]
+    if (!tid) continue
+    const shape =
+      circles.find((x) => x.id === tid) ?? arcs.find((x) => x.id === tid)
+    if (!shape) continue
+    const rc = circleWithResolvedCenter(shape, pointById)
+    if (rc.r < 1e-9) continue
+    const { pBend, pLand } = radialLeaderGeometry({
+      cx: rc.cx,
+      cy: rc.cy,
+      r: rc.r,
+      zoom,
+      leaderAngle: dim.leaderAngle ?? 0,
+      leaderShoulderWorld: dim.leaderShoulderWorld,
+    })
+    const d = distPointToSegment(
+      wx,
+      wy,
+      pBend.x,
+      pBend.y,
+      pLand.x,
+      pLand.y,
+    )
+    if (d <= tol && d < bestD) {
+      bestD = d
+      bestId = dim.id
+    }
+  }
+  return bestId
+}
+
 export function hitDrivingDimension(wx, wy, data, tolWorld, zoom) {
   const dims = data.dimensions ?? []
   let bestId = null

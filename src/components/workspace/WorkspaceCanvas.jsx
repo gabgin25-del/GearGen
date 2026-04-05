@@ -52,7 +52,10 @@ import {
   splineCurvatureDimensionDraft,
   resolveDimensionFromTwoPicks,
 } from '../../lib/dimensionPick.js'
-import { hitDrivingDimension } from '../../lib/dimensionHitTest.js'
+import {
+  hitDrivingDimension,
+  hitRadialDimensionShoulder,
+} from '../../lib/dimensionHitTest.js'
 import {
   DEFAULT_DOCUMENT_UNITS,
   formatLengthMmForDisplay,
@@ -71,6 +74,13 @@ import { canvasLocalFromClient } from '../../lib/workspaceCoords.js'
 import { collectSketchEntitiesInWorldRect } from '../../lib/marqueeSelection.js'
 import { ARC_MODE, TOOL } from '../../hooks/useWorkspaceScene.js'
 import { useElementSize } from '../../hooks/useElementSize.js'
+import Draggable from 'react-draggable'
+import { completeDrivingDimensionPlacement } from '../../lib/dimensionPlacementCommit.js'
+import {
+  trySubtractCircleFromFill,
+  trySubtractRectFromFill,
+} from '../../lib/sketchBooleanCut.js'
+import { radialLeaderGeometry } from '../../lib/DimensionRenderer.js'
 
 /**
  * @param {object} dim
@@ -100,6 +110,21 @@ function sanitizeDimEditDraft(raw, dimType) {
     return s.replace(/[^\d.+\-eE]/g, '')
   }
   return s.replace(/[^\d.]/g, '')
+}
+
+/** Top UI chrome (header) clearance for floating dimension popover. */
+const CHROME_TOP_PAD_PX = 52
+
+function tryCommitForSketchPlacement(d, co) {
+  const r = tryCommitConstraint(d, co)
+  if (r.ok) return r
+  if (r.reason === 'needSolver') {
+    return {
+      ok: true,
+      data: { ...d, constraints: [...(d.constraints ?? []), co] },
+    }
+  }
+  return { ok: false }
 }
 
 /** Ruler-style cursor for dimension tool (fallback: crosshair). */
@@ -445,7 +470,13 @@ export function WorkspaceCanvas({
   sketchLockState = null,
   theme = 'dark',
   setDrivingDimensionValue,
+  cutMode = false,
 }) {
+  const cutModeRef = useRef(cutMode)
+  useEffect(() => {
+    cutModeRef.current = cutMode
+  }, [cutMode])
+
   const [hoverHighlight, setHoverHighlight] = useState(null)
   const hoverHighlightRef = useRef(null)
   const [snapGuideHighlight, setSnapGuideHighlight] = useState(null)
@@ -454,6 +485,8 @@ export function WorkspaceCanvas({
   const dimInputRef = useRef(null)
   /** Live radial Ø/R leader drag (visual only until pointer up). */
   const radialLeaderDragRef = useRef(null)
+  /** Live radial shoulder length drag (leaderShoulderWorld). */
+  const radialShoulderDragRef = useRef(null)
   const paintRef = useRef(() => {})
   const setDrivingDimRef = useRef(setDrivingDimensionValue)
   const sketchSelectionRef = useRef(sketchSelection)
@@ -486,6 +519,25 @@ export function WorkspaceCanvas({
   /** @type {React.MutableRefObject<null | { phase: string; [k: string]: unknown }>} */
   const dimPlacementRef = useRef(null)
   const { ref: containerRef, size } = useElementSize()
+
+  const clampDimPopoverPosition = useCallback(
+    (left, top) => {
+      const w = size.width
+      const h = size.height
+      const pw = 220
+      const ph = 120
+      const pad = 8
+      const topMin = CHROME_TOP_PAD_PX
+      return {
+        left: Math.min(Math.max(pad, left), Math.max(pad, w - pw - pad)),
+        top: Math.min(
+          Math.max(topMin + pad, top),
+          Math.max(topMin + pad, h - ph - pad),
+        ),
+      }
+    },
+    [size.width, size.height],
+  )
   const canvasRef = useRef(null)
   const marqueeOverlayRef = useRef(null)
   const panRef = useRef(pan)
@@ -658,18 +710,21 @@ export function WorkspaceCanvas({
       const rect = containerRef.current?.getBoundingClientRect()
       if (!rect) return
       const { draft, editInDegrees } = drivingDimEditDraft(dim)
+      const l0 = e.clientX - rect.left - 90
+      const t0 = e.clientY - rect.top - 78
+      const c = clampDimPopoverPosition(l0, t0)
       setDimEdit({
         id: dimPickId,
         dimType: dim.type,
         editInDegrees,
-        left: e.clientX - rect.left,
-        top: e.clientY - rect.top,
+        left: c.left,
+        top: c.top,
         draft,
         baselineDraft: draft,
         openKey: Date.now(),
       })
     },
-    [tool, setDrivingDimensionValue, drivingDimEditDraft],
+    [tool, setDrivingDimensionValue, drivingDimEditDraft, clampDimPopoverPosition],
   )
 
   const commitDimEdit = useCallback(() => {
@@ -810,15 +865,25 @@ export function WorkspaceCanvas({
         : strokes
 
     const rd = radialLeaderDragRef.current
-    const dimensionsDraw =
-      rd?.dimId != null
-        ? dimensions.map((d) =>
-            d.id === rd.dimId &&
-            (d.type === 'radius' || d.type === 'diameter')
-              ? { ...d, leaderAngle: rd.leaderAngle }
-              : d,
-          )
-        : dimensions
+    const rs = radialShoulderDragRef.current
+    const dimensionsDraw = dimensions.map((d) => {
+      let o = d
+      if (
+        rd?.dimId != null &&
+        d.id === rd.dimId &&
+        (d.type === 'radius' || d.type === 'diameter')
+      ) {
+        o = { ...o, leaderAngle: rd.leaderAngle }
+      }
+      if (
+        rs?.dimId != null &&
+        o.id === rs.dimId &&
+        (o.type === 'radius' || o.type === 'diameter')
+      ) {
+        o = { ...o, leaderShoulderWorld: rs.shoulderWorld }
+      }
+      return o
+    })
 
     drawWorkspaceScene(ctx, {
       width: size.width,
@@ -1169,6 +1234,59 @@ export function WorkspaceCanvas({
           return
         }
         if (setDrivingDimRef.current && !dimEditRef.current) {
+          const shoulderId = hitRadialDimensionShoulder(
+            wx,
+            wy,
+            workspaceRef.current,
+            Math.max(6 / opt.zoom, 3),
+            opt.zoom,
+          )
+          if (shoulderId) {
+            const dim = (workspaceRef.current.dimensions ?? []).find(
+              (x) => x.id === shoulderId,
+            )
+            if (
+              dim &&
+              (dim.type === 'radius' || dim.type === 'diameter')
+            ) {
+              const pmapSh = new Map(
+                (workspaceRef.current.points ?? []).map((q) => [q.id, q]),
+              )
+              const tid = dim.targets?.[0]
+              const c =
+                (workspaceRef.current.circles ?? []).find((x) => x.id === tid) ??
+                (workspaceRef.current.arcs ?? []).find((x) => x.id === tid)
+              if (c) {
+                const rc = circleWithResolvedCenter(c, pmapSh)
+                if (rc.r > 1e-9) {
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                  const g = radialLeaderGeometry({
+                    cx: rc.cx,
+                    cy: rc.cy,
+                    r: rc.r,
+                    zoom: opt.zoom,
+                    leaderAngle: dim.leaderAngle ?? 0,
+                    leaderShoulderWorld: dim.leaderShoulderWorld,
+                  })
+                  const raw = (wx - g.pBend.x) * g.hSign
+                  const shoulderWorld = Math.max(
+                    8 / opt.zoom,
+                    Math.min(520, raw),
+                  )
+                  radialShoulderDragRef.current = {
+                    dimId: shoulderId,
+                    shoulderWorld,
+                  }
+                  dragRef.current = {
+                    type: 'radialShoulder',
+                    dimId: shoulderId,
+                  }
+                  paintRef.current()
+                  return
+                }
+              }
+            }
+          }
           const dimPickId = hitDrivingDimension(
             wx,
             wy,
@@ -1317,7 +1435,7 @@ export function WorkspaceCanvas({
             pid,
             edgeId,
             axisO,
-            tryCommitConstraint,
+            tryCommitForSketchPlacement,
             () => nextId('co'),
           )
           return next
@@ -1370,7 +1488,7 @@ export function WorkspaceCanvas({
                 pid,
                 edgeId,
                 axisO,
-                tryCommitConstraint,
+                tryCommitForSketchPlacement,
                 () => nextId('co'),
               )
               return next
@@ -1454,7 +1572,7 @@ export function WorkspaceCanvas({
             endPid,
             edgeId,
             axisO,
-            tryCommitConstraint,
+            tryCommitForSketchPlacement,
             () => nextId('co'),
           )
           return next
@@ -1466,6 +1584,59 @@ export function WorkspaceCanvas({
 
       if (t === TOOL.DIMENSION) {
         if (setDrivingDimRef.current && !dimEditRef.current) {
+          const shoulderId = hitRadialDimensionShoulder(
+            wx,
+            wy,
+            workspaceRef.current,
+            Math.max(6 / opt.zoom, 3),
+            opt.zoom,
+          )
+          if (shoulderId) {
+            const dim = (workspaceRef.current.dimensions ?? []).find(
+              (x) => x.id === shoulderId,
+            )
+            if (
+              dim &&
+              (dim.type === 'radius' || dim.type === 'diameter')
+            ) {
+              const pmapSh = new Map(
+                (workspaceRef.current.points ?? []).map((q) => [q.id, q]),
+              )
+              const tid = dim.targets?.[0]
+              const c =
+                (workspaceRef.current.circles ?? []).find((x) => x.id === tid) ??
+                (workspaceRef.current.arcs ?? []).find((x) => x.id === tid)
+              if (c) {
+                const rc = circleWithResolvedCenter(c, pmapSh)
+                if (rc.r > 1e-9) {
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                  const g = radialLeaderGeometry({
+                    cx: rc.cx,
+                    cy: rc.cy,
+                    r: rc.r,
+                    zoom: opt.zoom,
+                    leaderAngle: dim.leaderAngle ?? 0,
+                    leaderShoulderWorld: dim.leaderShoulderWorld,
+                  })
+                  const raw = (wx - g.pBend.x) * g.hSign
+                  const shoulderWorld = Math.max(
+                    8 / opt.zoom,
+                    Math.min(520, raw),
+                  )
+                  radialShoulderDragRef.current = {
+                    dimId: shoulderId,
+                    shoulderWorld,
+                  }
+                  dragRef.current = {
+                    type: 'radialShoulder',
+                    dimId: shoulderId,
+                  }
+                  paintRef.current()
+                  return
+                }
+              }
+            }
+          }
           const dimPickId = hitDrivingDimension(
             wx,
             wy,
@@ -1502,232 +1673,25 @@ export function WorkspaceCanvas({
 
         const ws = workspaceRef.current
         const dstate = dimPlacementRef.current
+        const rectCont = containerRef.current?.getBoundingClientRect()
 
-        if (dstate?.phase === 'place') {
-          const pl = dstate
+        const runDimPlacement = (pl) => {
           dimPlacementRef.current = null
           setPreview(null)
-
-          if (pl.dimType === 'distance' && pl.ax != null) {
-            const dk = pl.distanceKind
-            const smart = dk === 'pointPoint' || dk === 'segment'
-            const proj = smart
-              ? classifyLinearDimensionProjection(
-                  wx,
-                  wy,
-                  pl.ax,
-                  pl.ay,
-                  pl.bx,
-                  pl.by,
-                )
-              : 'aligned'
-            const offsetWorld = linearDimensionOffsetForProjection(
-              wx,
-              wy,
-              pl.ax,
-              pl.ay,
-              pl.bx,
-              pl.by,
-              proj,
-            )
-            const value = linearDistanceValueForProjection(
-              pl.ax,
-              pl.ay,
-              pl.bx,
-              pl.by,
-              proj,
-            )
-            const dimId = nextId('dim')
-            const rectPl = containerRef.current?.getBoundingClientRect()
-            const ldoPl = labelDrawOptionsRef.current
-            const duPl = ldoPl?.documentUnits ?? DEFAULT_DOCUMENT_UNITS
-            commit((d) => {
-              const dims = d.dimensions ?? []
-              const row = {
-                id: dimId,
-                type: 'distance',
-                value,
-                targets: pl.targets,
-                distanceKind: pl.distanceKind ?? 'segment',
-                offsetWorld,
-                linearProjection: proj,
-              }
-              return { ...d, dimensions: [...dims, row] }
-            })
-            if (rectPl && setDrivingDimRef.current) {
-              const d0 =
-                value != null && Number.isFinite(value)
-                  ? String(worldMmToDisplay(value, duPl))
-                  : ''
-              setDimEdit({
-                id: dimId,
-                dimType: 'distance',
-                editInDegrees: false,
-                left: e.clientX - rectPl.left + 12,
-                top: e.clientY - rectPl.top - 30,
-                draft: d0,
-                baselineDraft: d0,
-                openKey: Date.now(),
-              })
-            }
-            return
-          }
-
-          if (pl.dimType === 'angle') {
-            const dimIdAng = nextId('dim')
-            const rectAng = containerRef.current?.getBoundingClientRect()
-            const showDegPl = labelDrawOptionsRef.current?.showAngleDegrees !== false
-            commit((d) => {
-              const dims = d.dimensions ?? []
-              if (
-                dims.some(
-                  (dm) =>
-                    dm.type === 'angle' &&
-                    dm.targets?.length === 2 &&
-                    dm.targets[0]?.id === pl.targets[0].id &&
-                    dm.targets[1]?.id === pl.targets[1].id,
-                )
-              ) {
-                return d
-              }
-              return {
-                ...d,
-                dimensions: [
-                  ...dims,
-                  {
-                    id: dimIdAng,
-                    type: 'angle',
-                    value: pl.value,
-                    targets: pl.targets,
-                  },
-                ],
-              }
-            })
-            if (rectAng && setDrivingDimRef.current) {
-              const v0 = pl.value
-              const dAng =
-                v0 != null && Number.isFinite(v0)
-                  ? showDegPl
-                    ? String((v0 * 180) / Math.PI)
-                    : String(v0)
-                  : ''
-              setDimEdit({
-                id: dimIdAng,
-                dimType: 'angle',
-                editInDegrees: showDegPl,
-                left: e.clientX - rectAng.left + 12,
-                top: e.clientY - rectAng.top - 30,
-                draft: dAng,
-                baselineDraft: dAng,
-                openKey: Date.now(),
-              })
-            }
-            return
-          }
-
-          if (pl.dimType === 'radius') {
-            const dimIdR = nextId('dim')
-            const rectR = containerRef.current?.getBoundingClientRect()
-            const ldoR = labelDrawOptionsRef.current
-            const duR = ldoR?.documentUnits ?? DEFAULT_DOCUMENT_UNITS
-            commit((d) => {
-              const dims = d.dimensions ?? []
-              if (
-                dims.some(
-                  (dm) =>
-                    dm.type === 'radius' && dm.targets?.[0] === pl.targets[0],
-                )
-              ) {
-                return d
-              }
-              const row = {
-                id: dimIdR,
-                type: 'radius',
-                value: pl.value,
-                targets: pl.targets,
-                leaderAngle: pl.leaderAngle ?? 0,
-                splineCurvature: !!pl.splineCurvature,
-                ...(pl.splineCurvature
-                  ? {
-                      dimCx: pl.cx,
-                      dimCy: pl.cy,
-                      dimR: pl.value,
-                    }
-                  : {}),
-              }
-              return { ...d, dimensions: [...dims, row] }
-            })
-            if (rectR && setDrivingDimRef.current) {
-              const vr = pl.value
-              const dR =
-                vr != null && Number.isFinite(vr)
-                  ? String(worldMmToDisplay(vr, duR))
-                  : ''
-              setDimEdit({
-                id: dimIdR,
-                dimType: 'radius',
-                editInDegrees: false,
-                left: e.clientX - rectR.left + 12,
-                top: e.clientY - rectR.top - 30,
-                draft: dR,
-                baselineDraft: dR,
-                openKey: Date.now(),
-              })
-            }
-            return
-          }
-
-          if (pl.dimType === 'diameter') {
-            const dimIdD = nextId('dim')
-            const rectD = containerRef.current?.getBoundingClientRect()
-            const ldoD = labelDrawOptionsRef.current
-            const duD = ldoD?.documentUnits ?? DEFAULT_DOCUMENT_UNITS
-            commit((d) => {
-              const dims = d.dimensions ?? []
-              if (
-                dims.some(
-                  (dm) =>
-                    dm.type === 'diameter' &&
-                    dm.targets?.[0] === pl.targets[0],
-                )
-              ) {
-                return d
-              }
-              return {
-                ...d,
-                dimensions: [
-                  ...dims,
-                  {
-                    id: dimIdD,
-                    type: 'diameter',
-                    value: pl.value,
-                    targets: pl.targets,
-                    leaderAngle: pl.leaderAngle ?? 0,
-                  },
-                ],
-              }
-            })
-            if (rectD && setDrivingDimRef.current) {
-              const vd = pl.value
-              const dD =
-                vd != null && Number.isFinite(vd)
-                  ? String(worldMmToDisplay(vd, duD))
-                  : ''
-              setDimEdit({
-                id: dimIdD,
-                dimType: 'diameter',
-                editInDegrees: false,
-                left: e.clientX - rectD.left + 12,
-                top: e.clientY - rectD.top - 30,
-                draft: dD,
-                baselineDraft: dD,
-                openKey: Date.now(),
-              })
-            }
-            return
-          }
-
-          return
+          completeDrivingDimensionPlacement({
+            pl,
+            wx,
+            wy,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            containerRect: rectCont,
+            commit,
+            nextId,
+            setDimEdit,
+            canOpenEditor: !!setDrivingDimRef.current,
+            labelDrawOptions: labelDrawOptionsRef.current,
+            clampPopover: clampDimPopoverPosition,
+          })
         }
 
         if (dstate?.phase === 'pick2') {
@@ -1756,8 +1720,7 @@ export function WorkspaceCanvas({
               dimPlacementRef.current = null
               return
             }
-            dimPlacementRef.current = {
-              phase: 'place',
+            runDimPlacement({
               dimType: 'distance',
               distanceKind: 'segment',
               targets: [seg.id],
@@ -1766,7 +1729,7 @@ export function WorkspaceCanvas({
               ay: pa.y,
               bx: pb.x,
               by: pb.y,
-            }
+            })
             return
           }
           const resolved = resolveDimensionFromTwoPicks(p1, e2, ws)
@@ -1775,7 +1738,7 @@ export function WorkspaceCanvas({
             setPreview(null)
             return
           }
-          dimPlacementRef.current = { phase: 'place', ...resolved }
+          runDimPlacement(resolved)
           return
         }
 
@@ -1785,19 +1748,19 @@ export function WorkspaceCanvas({
         if (e1.kind === 'circle') {
           const rad = diameterDimensionDraftFromCircle(e1, ws, wx, wy)
           if (!rad) return
-          dimPlacementRef.current = { phase: 'place', ...rad }
+          runDimPlacement(rad)
           return
         }
         if (e1.kind === 'arc') {
           const rad = radiusDimensionDraftFromArc(e1, ws, wx, wy)
           if (!rad) return
-          dimPlacementRef.current = { phase: 'place', ...rad }
+          runDimPlacement(rad)
           return
         }
         if (e1.kind === 'spline') {
           const rad = splineCurvatureDimensionDraft(e1, ws, wx, wy)
           if (!rad) return
-          dimPlacementRef.current = { phase: 'place', ...rad }
+          runDimPlacement(rad)
           return
         }
 
@@ -1840,6 +1803,21 @@ export function WorkspaceCanvas({
           patchDraft(null)
           setPreview(null)
           return
+        }
+        if (cutModeRef.current) {
+          const carved = trySubtractCircleFromFill(
+            workspaceRef.current,
+            draft.cx,
+            draft.cy,
+            rad,
+            nextId,
+          )
+          if (carved) {
+            commit(() => carved)
+            patchDraft(null)
+            setPreview(null)
+            return
+          }
         }
         const fill = shapeStyleRef.current.fillNewShapes
           ? shapeStyleRef.current.shapeFillRgba
@@ -1892,6 +1870,18 @@ export function WorkspaceCanvas({
         if (maxx - minx < 2 || maxy - miny < 2) {
           patchDraft(null)
           return
+        }
+        if (cutModeRef.current) {
+          const carved = trySubtractRectFromFill(
+            workspaceRef.current,
+            { minx, miny, maxx, maxy },
+            nextId,
+          )
+          if (carved) {
+            commit(() => carved)
+            patchDraft(null)
+            return
+          }
         }
         const fill = shapeStyleRef.current.fillNewShapes
           ? shapeStyleRef.current.shapeFillRgba
@@ -2651,6 +2641,7 @@ export function WorkspaceCanvas({
       unionSketchSelection,
       setDimEdit,
       drivingDimEditDraft,
+      clampDimPopoverPosition,
     ],
   )
 
@@ -2693,6 +2684,50 @@ export function WorkspaceCanvas({
         if (!cen) return
         const leaderAngle = Math.atan2(wy - cen.cy, wx - cen.cx)
         radialLeaderDragRef.current = { dimId: d.dimId, leaderAngle }
+        paintRef.current()
+        return
+      }
+
+      if (d?.type === 'radialShoulder' && d.dimId) {
+        const { x: lx } = canvasLocalFromClient(
+          canvas,
+          e.clientX,
+          e.clientY,
+        )
+        const wx = (lx - p.x) / opt.zoom
+        const dim = (workspaceRef.current.dimensions ?? []).find(
+          (x) => x.id === d.dimId,
+        )
+        if (!dim) {
+          radialShoulderDragRef.current = null
+          dragRef.current = null
+          paintRef.current()
+          return
+        }
+        const pmap = new Map(
+          (workspaceRef.current.points ?? []).map((q) => [q.id, q]),
+        )
+        const tid = dim.targets?.[0]
+        const c =
+          (workspaceRef.current.circles ?? []).find((x) => x.id === tid) ??
+          (workspaceRef.current.arcs ?? []).find((x) => x.id === tid)
+        if (!c) return
+        const rc = circleWithResolvedCenter(c, pmap)
+        if (rc.r < 1e-9) return
+        const g = radialLeaderGeometry({
+          cx: rc.cx,
+          cy: rc.cy,
+          r: rc.r,
+          zoom: opt.zoom,
+          leaderAngle: dim.leaderAngle ?? 0,
+          leaderShoulderWorld: dim.leaderShoulderWorld,
+        })
+        const raw = (wx - g.pBend.x) * g.hSign
+        const shoulderWorld = Math.max(8 / opt.zoom, Math.min(520, raw))
+        radialShoulderDragRef.current = {
+          dimId: d.dimId,
+          shoulderWorld,
+        }
         paintRef.current()
         return
       }
@@ -2854,85 +2889,105 @@ export function WorkspaceCanvas({
 
       if (!d && toolRef.current === TOOL.DIMENSION) {
         const pl = dimPlacementRef.current
-        if (pl?.phase === 'place') {
+        if (pl?.phase === 'pick2' && pl.pick1) {
           const wx = (lx - p.x) / opt.zoom
           const wy = (ly - p.y) / opt.zoom
+          const eHover = pickDimensionEntity(
+            wx,
+            wy,
+            workspaceRef.current,
+            opt.zoom,
+          )
+          if (!eHover) {
+            setPreview(null)
+            return
+          }
+          const resolved = resolveDimensionFromTwoPicks(
+            pl.pick1,
+            eHover,
+            workspaceRef.current,
+          )
+          if (!resolved) {
+            setPreview(null)
+            return
+          }
+          const pv = resolved
           const ldo = labelDrawOptionsRef.current
           const du = ldo?.documentUnits ?? DEFAULT_DOCUMENT_UNITS
           const unit = ldo?.worldUnit ?? 'mm'
           const showDeg = ldo?.showAngleDegrees !== false
           const z = opt.zoom
-          if (pl.dimType === 'distance' && pl.ax != null) {
-            const dk = pl.distanceKind
+          if (pv.dimType === 'distance' && pv.ax != null) {
+            const dk = pv.distanceKind
             const smart =
               dk === 'pointPoint' || dk === 'segment'
             const proj = smart
               ? classifyLinearDimensionProjection(
                   wx,
                   wy,
-                  pl.ax,
-                  pl.ay,
-                  pl.bx,
-                  pl.by,
+                  pv.ax,
+                  pv.ay,
+                  pv.bx,
+                  pv.by,
                 )
               : 'aligned'
             const off = linearDimensionOffsetForProjection(
               wx,
               wy,
-              pl.ax,
-              pl.ay,
-              pl.bx,
-              pl.by,
+              pv.ax,
+              pv.ay,
+              pv.bx,
+              pv.by,
               proj,
             )
             const v = linearDistanceValueForProjection(
-              pl.ax,
-              pl.ay,
-              pl.bx,
-              pl.by,
+              pv.ax,
+              pv.ay,
+              pv.bx,
+              pv.by,
               proj,
             )
             setPreview({
               kind: 'linearDimension',
-              ax: pl.ax,
-              ay: pl.ay,
-              bx: pl.bx,
-              by: pl.by,
+              ax: pv.ax,
+              ay: pv.ay,
+              bx: pv.bx,
+              by: pv.by,
               offsetWorld: off,
               projection: proj,
               label: `${formatLengthMmForDisplay(v, du)} ${unit}`,
             })
-          } else if (pl.dimType === 'angle' && pl.a0 != null) {
-            const r = Math.max(12 / z, Math.hypot(wx - pl.vx, wy - pl.vy))
+          } else if (pv.dimType === 'angle' && pv.a0 != null) {
+            const r = Math.max(12 / z, Math.hypot(wx - pv.vx, wy - pv.vy))
             const label = showDeg
-              ? `${((pl.value * 180) / Math.PI).toFixed(1)}°`
-              : `${Number(pl.value).toFixed(3)} rad`
+              ? `${((pv.value * 180) / Math.PI).toFixed(1)}°`
+              : `${Number(pv.value).toFixed(3)} rad`
             setPreview({
               kind: 'angularDimension',
-              vx: pl.vx,
-              vy: pl.vy,
+              vx: pv.vx,
+              vy: pv.vy,
               r,
-              a0: pl.a0,
-              a1: pl.a1,
+              a0: pv.a0,
+              a1: pv.a1,
               label,
             })
-          } else if (pl.dimType === 'radius') {
+          } else if (pv.dimType === 'radius') {
             setPreview({
               kind: 'radialDimension',
-              cx: pl.cx,
-              cy: pl.cy,
-              r: pl.r,
-              leaderAngle: pl.leaderAngle ?? 0,
-              label: `R ${formatLengthMmForDisplay(pl.value, du)} ${unit}`,
+              cx: pv.cx,
+              cy: pv.cy,
+              r: pv.r,
+              leaderAngle: pv.leaderAngle ?? 0,
+              label: `R ${formatLengthMmForDisplay(pv.value, du)} ${unit}`,
             })
-          } else if (pl.dimType === 'diameter') {
+          } else if (pv.dimType === 'diameter') {
             setPreview({
               kind: 'radialDimension',
-              cx: pl.cx,
-              cy: pl.cy,
-              r: pl.r,
-              leaderAngle: pl.leaderAngle ?? 0,
-              label: `Ø ${formatLengthMmForDisplay(pl.value, du)} ${unit}`,
+              cx: pv.cx,
+              cy: pv.cy,
+              r: pv.r,
+              leaderAngle: pv.leaderAngle ?? 0,
+              label: `Ø ${formatLengthMmForDisplay(pv.value, du)} ${unit}`,
             })
           }
         }
@@ -3357,6 +3412,29 @@ export function WorkspaceCanvas({
         return
       }
 
+      if (d?.type === 'radialShoulder') {
+        const rs = radialShoulderDragRef.current
+        radialShoulderDragRef.current = null
+        dragRef.current = null
+        if (rs?.dimId != null) {
+          commit((data) => ({
+            ...data,
+            dimensions: (data.dimensions ?? []).map((dm) =>
+              dm.id === rs.dimId
+                ? { ...dm, leaderShoulderWorld: rs.shoulderWorld }
+                : dm,
+            ),
+          }))
+        }
+        paintRef.current()
+        try {
+          e.currentTarget.releasePointerCapture(e.pointerId)
+        } catch {
+          /* ignore */
+        }
+        return
+      }
+
       if (d?.type === 'movePoint') {
         dragRef.current = null
         setSnapGuideHighlight(null)
@@ -3455,57 +3533,68 @@ export function WorkspaceCanvas({
           className="pointer-events-none absolute inset-0 z-20"
           aria-live="polite"
         >
-          <div
-            className="pointer-events-auto absolute flex min-w-[7rem] flex-col gap-1 rounded-md border border-gg-border bg-gg-workspace p-2 shadow-lg"
-            style={{
-              left: dimEdit.left,
-              top: dimEdit.top,
-              transform: 'translate(-50%, calc(-100% - 8px))',
-            }}
+          <Draggable
+            key={dimEdit.openKey ?? dimEdit.id}
+            bounds="parent"
+            handle=".dim-drag-handle"
+            cancel="input"
+            defaultPosition={{ x: dimEdit.left, y: dimEdit.top }}
           >
-            <label className="text-[10px] font-medium uppercase tracking-wide text-gg-muted">
-              {dimEdit.dimType === 'angle' && dimEdit.editInDegrees
-                ? 'Driving angle (°)'
-                : dimEdit.dimType === 'angle'
-                  ? 'Driving angle (rad)'
-                  : dimEdit.dimType === 'radius'
-                    ? 'Driving radius'
-                    : dimEdit.dimType === 'diameter'
-                      ? 'Driving diameter'
-                      : 'Driving length'}
-            </label>
-            <input
-              ref={dimInputRef}
-              type="text"
-              inputMode="decimal"
-              autoComplete="off"
-              className="w-full rounded border border-gg-border bg-gg-canvas-bg px-2 py-1.5 text-[13px] text-gg-text tabular-nums"
-              value={dimEdit.draft}
-              placeholder={dimEdit.baselineDraft ?? ''}
-              onChange={(ev) =>
-                setDimEdit((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        draft: sanitizeDimEditDraft(
-                          ev.target.value,
-                          prev.dimType,
-                        ),
-                      }
-                    : prev,
-                )
-              }
-              onKeyDown={(ev) => {
-                if (ev.key === 'Enter') {
-                  ev.preventDefault()
-                  commitDimEdit()
-                }
-              }}
-              onBlur={() => {
-                commitDimEdit()
-              }}
-            />
-          </div>
+            <div className="pointer-events-auto absolute left-0 top-0 flex min-w-[10rem] max-w-[16rem] flex-col overflow-hidden rounded-md border border-gg-border bg-gg-workspace shadow-lg">
+              <div className="dim-drag-handle flex cursor-grab touch-none items-center justify-between gap-1 rounded-t-md border-b border-gg-border/60 bg-gg-canvas-bg/40 px-2 py-1 active:cursor-grabbing">
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-gg-muted">
+                  Driving dimension
+                </span>
+                <span className="select-none text-[10px] text-gg-muted opacity-50" aria-hidden>
+                  ⋮⋮
+                </span>
+              </div>
+              <div className="flex flex-col gap-1 px-2 py-2">
+                <label className="text-[10px] font-medium uppercase tracking-wide text-gg-muted">
+                  {dimEdit.dimType === 'angle' && dimEdit.editInDegrees
+                    ? 'Driving angle (°)'
+                    : dimEdit.dimType === 'angle'
+                      ? 'Driving angle (rad)'
+                      : dimEdit.dimType === 'radius'
+                        ? 'Driving radius'
+                        : dimEdit.dimType === 'diameter'
+                          ? 'Driving diameter'
+                          : 'Driving length'}
+                </label>
+                <input
+                  ref={dimInputRef}
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  className="w-full rounded border border-gg-border bg-gg-canvas-bg px-2 py-1.5 text-[13px] text-gg-text tabular-nums"
+                  value={dimEdit.draft}
+                  placeholder={dimEdit.baselineDraft ?? ''}
+                  onChange={(ev) =>
+                    setDimEdit((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            draft: sanitizeDimEditDraft(
+                              ev.target.value,
+                              prev.dimType,
+                            ),
+                          }
+                        : prev,
+                    )
+                  }
+                  onKeyDown={(ev) => {
+                    if (ev.key === 'Enter') {
+                      ev.preventDefault()
+                      commitDimEdit()
+                    }
+                  }}
+                  onBlur={() => {
+                    commitDimEdit()
+                  }}
+                />
+              </div>
+            </div>
+          </Draggable>
         </div>
       ) : null}
     </div>

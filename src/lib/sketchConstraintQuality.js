@@ -517,16 +517,19 @@ export function relaxAllConstraints(data, passes = 10) {
  */
 export function tryCommitConstraint(data, newCo) {
   if (isRedundantConstraint(data, newCo)) {
-    return { ok: false, reason: 'redundant' }
+    return { ok: true, data }
   }
   let next = {
     ...data,
     constraints: [...(data.constraints ?? []), newCo],
   }
   next = applyConstraintEnforcement(next, newCo)
-  next = relaxAllConstraints(next, 12)
+  next = relaxAllConstraints(next, 24)
   if (!allConstraintsSatisfied(next)) {
-    return { ok: false, reason: 'overconstrained' }
+    next = relaxAllConstraints(next, 48)
+  }
+  if (!allConstraintsSatisfied(next)) {
+    return { ok: false, reason: 'needSolver' }
   }
   return { ok: true, data: next }
 }

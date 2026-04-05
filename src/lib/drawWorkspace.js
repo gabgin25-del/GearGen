@@ -794,18 +794,35 @@ export function drawWorkspaceScene(ctx, p) {
       ctx.lineTo(v.x, v.y)
     }
     ctx.closePath()
+    for (const holeRing of poly.holes ?? []) {
+      const h0 = pointById.get(holeRing[0])
+      if (!h0 || holeRing.length < 2) continue
+      ctx.moveTo(h0.x, h0.y)
+      for (let i = 1; i < holeRing.length; i++) {
+        const hv = pointById.get(holeRing[i])
+        if (!hv) continue
+        ctx.lineTo(hv.x, hv.y)
+      }
+      ctx.closePath()
+    }
     if (poly.fill && fillRegions) {
       ctx.fillStyle = pal.closedRegionFill
-      ctx.fill()
+      ctx.fill('evenodd')
     }
   }
 
   for (const c of resolvedCircles) {
     if (c.fill && fillRegions) {
       ctx.beginPath()
-      ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2)
+      ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2, false)
+      for (const h of c.holes ?? []) {
+        if (h?.r > 1e-9) {
+          ctx.moveTo(h.cx + h.r, h.cy)
+          ctx.arc(h.cx, h.cy, h.r, 0, Math.PI * 2, true)
+        }
+      }
       ctx.fillStyle = pal.closedRegionFill
-      ctx.fill()
+      ctx.fill('evenodd')
     }
   }
 
@@ -1015,6 +1032,7 @@ export function drawWorkspaceScene(ctx, p) {
           label,
           theme,
           leaderAngle: dim.leaderAngle ?? 0,
+          leaderShoulderWorld: dim.leaderShoulderWorld,
         })
       } else if (dim.type === 'diameter' && dim.targets?.[0]) {
         const c = circles.find((x) => x.id === dim.targets[0])
@@ -1032,6 +1050,7 @@ export function drawWorkspaceScene(ctx, p) {
           label,
           theme,
           leaderAngle: dim.leaderAngle ?? 0,
+          leaderShoulderWorld: dim.leaderShoulderWorld,
         })
       } else if (dim.type === 'angle' && dim.targets?.length === 3) {
         const [idC, idA, idB] = dim.targets
@@ -1478,6 +1497,7 @@ export function drawWorkspaceScene(ctx, p) {
         label: preview.label ?? '',
         theme,
         leaderAngle: preview.leaderAngle ?? 0,
+        leaderShoulderWorld: preview.leaderShoulderWorld,
       })
       ctx.restore()
     }

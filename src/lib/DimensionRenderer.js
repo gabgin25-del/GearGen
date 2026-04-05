@@ -287,6 +287,49 @@ export function drawLinearDimension(ctx, o) {
 }
 
 /**
+ * Geometry for radial Ø/R leaders (world space, matches drawRadialDimension).
+ *
+ * @param {{
+ *   cx: number; cy: number; r: number; zoom: number
+ *   leaderAngle?: number
+ *   leaderShoulderWorld?: number | null
+ * }} o
+ */
+export function radialLeaderGeometry(o) {
+  const { cx, cy, r, zoom, leaderAngle = 0, leaderShoulderWorld } = o
+  const z = zoom || 1
+  const ca = Math.cos(leaderAngle)
+  const sa = Math.sin(leaderAngle)
+  const gap = ANSI_EXT_GAP_WORLD
+  const pIn = { x: cx + ca * gap, y: cy + sa * gap }
+  const pRim = { x: cx + ca * r, y: cy + sa * r }
+  const pOut = { x: cx + ca * (r + gap), y: cy + sa * (r + gap) }
+  const radStub = 14 / z
+  const pBend = { x: pOut.x + ca * radStub, y: pOut.y + sa * radStub }
+  const shoulderDefault = 42 / z
+  const shoulder =
+    leaderShoulderWorld != null &&
+    Number.isFinite(leaderShoulderWorld) &&
+    leaderShoulderWorld > 0
+      ? leaderShoulderWorld
+      : shoulderDefault
+  const hSign = ca >= 0 ? 1 : -1
+  const pLand = { x: pBend.x + hSign * shoulder, y: pBend.y }
+  return {
+    pIn,
+    pRim,
+    pOut,
+    pBend,
+    pLand,
+    shoulder,
+    hSign,
+    ca,
+    sa,
+    radStub,
+  }
+}
+
+/**
  * Radial / diameter dimension: leader from center through the curve, radial stub,
  * horizontal shoulder (landing), then text.
  *
@@ -294,28 +337,27 @@ export function drawLinearDimension(ctx, o) {
  *   cx: number; cy: number; r: number; zoom: number; label: string
  *   theme?: 'light' | 'dark'
  *   leaderAngle?: number
+ *   leaderShoulderWorld?: number | null
  * }} o
  */
 export function drawRadialDimension(ctx, o) {
   const { cx, cy, r, zoom, label, theme = 'dark', leaderAngle = 0 } = o
   const z = zoom || 1
   if (r < 1e-6) return
-  const ca = Math.cos(leaderAngle)
-  const sa = Math.sin(leaderAngle)
   const gap = ANSI_EXT_GAP_WORLD
   const dimTint =
     theme === 'light' ? 'rgba(30, 41, 59, 0.92)' : 'rgba(226, 232, 240, 0.92)'
   const extTint =
     theme === 'light' ? 'rgba(71, 85, 105, 0.75)' : 'rgba(148, 163, 184, 0.78)'
 
-  const pIn = { x: cx + ca * gap, y: cy + sa * gap }
-  const pRim = { x: cx + ca * r, y: cy + sa * r }
-  const pOut = { x: cx + ca * (r + gap), y: cy + sa * (r + gap) }
-  const radStub = 14 / z
-  const pBend = { x: pOut.x + ca * radStub, y: pOut.y + sa * radStub }
-  const shoulder = 42 / z
-  const hSign = ca >= 0 ? 1 : -1
-  const pLand = { x: pBend.x + hSign * shoulder, y: pBend.y }
+  const { pIn, pRim, pOut, pBend, pLand } = radialLeaderGeometry({
+    cx,
+    cy,
+    r,
+    zoom,
+    leaderAngle,
+    leaderShoulderWorld: o.leaderShoulderWorld,
+  })
 
   ctx.save()
   ctx.lineCap = 'round'

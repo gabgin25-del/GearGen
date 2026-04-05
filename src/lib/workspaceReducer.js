@@ -21,13 +21,17 @@ export function cloneWorkspaceData(data) {
     })),
     points: data.points.map((p) => ({ ...p })),
     segments: data.segments.map((s) => ({ ...s })),
-    circles: data.circles.map((c) => ({ ...c })),
+    circles: data.circles.map((c) => ({
+      ...c,
+      holes: c.holes ? c.holes.map((h) => ({ ...h })) : undefined,
+    })),
     polygons: data.polygons.map((p) => ({
       ...p,
       vertexIds: [...p.vertexIds],
       boundarySegmentIds: p.boundarySegmentIds
         ? [...p.boundarySegmentIds]
         : undefined,
+      holes: p.holes ? p.holes.map((ring) => [...ring]) : undefined,
     })),
     arcs: (data.arcs ?? []).map((a) => ({ ...a })),
     angles: (data.angles ?? []).map((a) => ({ ...a })),
