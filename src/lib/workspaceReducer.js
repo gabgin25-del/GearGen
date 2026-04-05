@@ -41,8 +41,15 @@ export function cloneWorkspaceData(data) {
     })),
     dimensions: (data.dimensions ?? []).map((d) => ({
       ...d,
-      targets: [...(d.targets ?? [])],
+      targets: (d.targets ?? []).map((t) =>
+        typeof t === 'object' && t !== null && !Array.isArray(t)
+          ? { ...t }
+          : t,
+      ),
     })),
+    solverDiagnostics: data.solverDiagnostics
+      ? { ...data.solverDiagnostics }
+      : undefined,
   }
 }
 

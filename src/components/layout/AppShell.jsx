@@ -268,6 +268,21 @@ export function AppShell() {
             </button>
           </div>
         )}
+        {scene.workspaceData?.solverDiagnostics?.engine === 'planegcs' &&
+        scene.workspaceData.solverDiagnostics.overConstrained ? (
+          <div
+            className={
+              theme === 'light'
+                ? 'mb-2 shrink-0 rounded-md border border-red-600/45 bg-red-600/10 px-3 py-2 text-[12px] text-red-900'
+                : 'mb-2 shrink-0 rounded-md border border-red-500/55 bg-red-500/12 px-3 py-2 text-[12px] text-red-200'
+            }
+            role="status"
+          >
+            Sketch is over-constrained (PlaneGCS). Remove or relax redundant
+            constraints, or adjust driving dimensions so the system can
+            resolve.
+          </div>
+        ) : null}
         <WorkspaceCanvas
           tool={scene.tool}
           pan={scene.pan}

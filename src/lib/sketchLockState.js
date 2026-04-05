@@ -252,7 +252,66 @@ export function pointHasRemainingDof(data, pointId) {
  *   splineFullyDefined: Set<string>
  * }}
  */
+function lockStateFullyDefined(data) {
+  const pointLocked = new Map(data.points.map((p) => [p.id, true]))
+  const segmentStrokeConstrained = new Map(
+    (data.segments ?? []).map((s) => [s.id, true]),
+  )
+  const polygonFullyDefined = new Set()
+  for (const poly of data.polygons ?? []) {
+    const ids = poly.vertexIds ?? []
+    if (ids.length >= 2 && ids.every((vid) => pointLocked.get(vid) === true)) {
+      polygonFullyDefined.add(poly.id)
+    }
+  }
+  const circleFullyDefined = new Set()
+  for (const c of data.circles ?? []) {
+    if (!c.centerId || pointLocked.get(c.centerId) === true) {
+      circleFullyDefined.add(c.id)
+    }
+  }
+  const splineFullyDefined = new Set()
+  for (const sp of data.splines ?? []) {
+    if (!sp.closed) continue
+    const ids = sp.vertexIds ?? []
+    if (ids.length >= 2 && ids.every((vid) => pointLocked.get(vid) === true)) {
+      splineFullyDefined.add(sp.id)
+    }
+  }
+  return {
+    pointLocked,
+    segmentStrokeConstrained,
+    polygonFullyDefined,
+    circleFullyDefined,
+    splineFullyDefined,
+  }
+}
+
+function lockStateOverConstrainedBlue(data) {
+  const pointLocked = new Map(data.points.map((p) => [p.id, false]))
+  const segmentStrokeConstrained = new Map(
+    (data.segments ?? []).map((s) => [s.id, false]),
+  )
+  return {
+    pointLocked,
+    segmentStrokeConstrained,
+    polygonFullyDefined: new Set(),
+    circleFullyDefined: new Set(),
+    splineFullyDefined: new Set(),
+  }
+}
+
 export function computeSketchLockState(data) {
+  const diag = data.solverDiagnostics
+  if (diag?.engine === 'planegcs' && !diag.solveFailed) {
+    if (diag.overConstrained) {
+      return lockStateOverConstrainedBlue(data)
+    }
+    if (diag.fullyDefined) {
+      return lockStateFullyDefined(data)
+    }
+  }
+
   const pointLocked = new Map()
   for (const p of data.points) {
     pointLocked.set(p.id, !pointHasRemainingDof(data, p.id))

@@ -352,7 +352,20 @@ export function useWorkspaceScene(options = {}) {
         ...d,
         dimensions: (d.dimensions ?? []).map((dim) => {
           if (dim.id !== id) return dim
-          if (dim.type === 'distance' && v <= 0) return dim
+          if (
+            (dim.type === 'distance' ||
+              dim.type === 'radius' ||
+              dim.type === 'diameter') &&
+            v <= 0
+          ) {
+            return dim
+          }
+          if (
+            dim.type === 'angle' &&
+            (v <= 0 || v > 2 * Math.PI + 1e-9)
+          ) {
+            return dim
+          }
           return { ...dim, value: v }
         }),
       }))

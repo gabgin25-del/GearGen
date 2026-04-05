@@ -119,8 +119,25 @@ export function deleteSketchEntities(data, selection) {
     if (dim.type === 'distance' && t[0]) {
       return segments.some((s) => s.id === t[0])
     }
+    if (
+      (dim.type === 'radius' || dim.type === 'diameter') &&
+      t[0]
+    ) {
+      return circles.some((c) => c.id === t[0])
+    }
     if (dim.type === 'angle' && t.length >= 3) {
       return t.every((pid) => points.some((p) => p.id === pid))
+    }
+    if (
+      dim.type === 'angle' &&
+      t.length === 2 &&
+      t[0]?.kind === 'segment' &&
+      t[1]?.kind === 'segment'
+    ) {
+      return (
+        segments.some((s) => s.id === t[0].id) &&
+        segments.some((s) => s.id === t[1].id)
+      )
     }
     return false
   })

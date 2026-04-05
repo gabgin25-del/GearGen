@@ -39,7 +39,8 @@ import {
   hitSegment,
   pointInPolygon,
 } from '../../lib/hitTest.js'
-import { hitDrivingDistanceDimension } from '../../lib/dimensionHitTest.js'
+import { circleWithResolvedCenter } from '../../lib/circleResolve.js'
+import { hitDrivingDimension } from '../../lib/dimensionHitTest.js'
 import { sampleSplinePolyline } from '../../lib/splineMath.js'
 import {
   circleRadiusFromCursor,
@@ -401,6 +402,7 @@ export function WorkspaceCanvas({
   const dimEditRef = useRef(null)
   const dimInputRef = useRef(null)
   const setDrivingDimRef = useRef(setDrivingDimensionValue)
+  const sketchSelectionRef = useRef(sketchSelection)
   const sketchLockStateRef = useRef(sketchLockState)
   const { ref: containerRef, size } = useElementSize()
   const canvasRef = useRef(null)
@@ -510,6 +512,10 @@ export function WorkspaceCanvas({
   }, [sketchLockState])
 
   useEffect(() => {
+    sketchSelectionRef.current = sketchSelection
+  }, [sketchSelection])
+
+  useEffect(() => {
     setDrivingDimRef.current = setDrivingDimensionValue
   }, [setDrivingDimensionValue])
 
@@ -532,9 +538,22 @@ export function WorkspaceCanvas({
     dimEditRef.current = null
     setDimEdit(null)
     if (!cur || !applyFn) return
-    const v = Number.parseFloat(String(cur.draft).trim())
-    if (!Number.isFinite(v) || v <= 0) return
-    applyFn(cur.id, cur.draft)
+    let v = Number.parseFloat(String(cur.draft).trim())
+    if (!Number.isFinite(v)) return
+    if (cur.editInDegrees) v = (v * Math.PI) / 180
+    const t = cur.dimType
+    if (
+      t === 'distance' ||
+      t === 'radius' ||
+      t === 'diameter'
+    ) {
+      if (v <= 0) return
+    } else if (t === 'angle') {
+      if (v <= 0 || v > 2 * Math.PI + 1e-9) return
+    } else if (v <= 0) {
+      return
+    }
+    applyFn(cur.id, v)
   }, [])
 
   useEffect(() => {
@@ -965,27 +984,40 @@ export function WorkspaceCanvas({
           return
         }
         if (setDrivingDimRef.current) {
-          const dimPickId = hitDrivingDistanceDimension(
+          const dimPickId = hitDrivingDimension(
             wx,
             wy,
             workspaceRef.current,
             Math.max(40 / opt.zoom, 5),
+            opt.zoom,
           )
           if (dimPickId) {
             const dim = (workspaceRef.current.dimensions ?? []).find(
               (d) => d.id === dimPickId,
             )
-            if (dim?.type === 'distance') {
+            if (
+              dim?.type === 'distance' ||
+              dim?.type === 'radius' ||
+              dim?.type === 'diameter' ||
+              dim?.type === 'angle'
+            ) {
               const rect = containerRef.current?.getBoundingClientRect()
               if (rect) {
+                const showDeg = labelDrawOptions?.showAngleDegrees !== false
+                const editInDegrees = dim.type === 'angle' && showDeg
+                let draft = ''
+                if (dim.value != null && Number.isFinite(dim.value)) {
+                  draft = editInDegrees
+                    ? String((dim.value * 180) / Math.PI)
+                    : String(dim.value)
+                }
                 setDimEdit({
                   id: dimPickId,
+                  dimType: dim.type,
+                  editInDegrees,
                   left: e.clientX - rect.left,
                   top: e.clientY - rect.top,
-                  draft:
-                    dim.value != null && Number.isFinite(dim.value)
-                      ? String(dim.value)
-                      : '',
+                  draft,
                 })
                 return
               }
@@ -1256,33 +1288,179 @@ export function WorkspaceCanvas({
 
       if (t === TOOL.DIMENSION) {
         if (setDrivingDimRef.current) {
-          const dimPickId = hitDrivingDistanceDimension(
+          const dimPickId = hitDrivingDimension(
             wx,
             wy,
             workspaceRef.current,
             Math.max(40 / opt.zoom, 5),
+            opt.zoom,
           )
           if (dimPickId) {
             const dim = (workspaceRef.current.dimensions ?? []).find(
               (d) => d.id === dimPickId,
             )
-            if (dim?.type === 'distance') {
+            if (
+              dim?.type === 'distance' ||
+              dim?.type === 'radius' ||
+              dim?.type === 'diameter' ||
+              dim?.type === 'angle'
+            ) {
               const rect = containerRef.current?.getBoundingClientRect()
               if (rect) {
+                const showDeg = labelDrawOptions?.showAngleDegrees !== false
+                const editInDegrees = dim.type === 'angle' && showDeg
+                let draft = ''
+                if (dim.value != null && Number.isFinite(dim.value)) {
+                  draft = editInDegrees
+                    ? String((dim.value * 180) / Math.PI)
+                    : String(dim.value)
+                }
                 setDimEdit({
                   id: dimPickId,
+                  dimType: dim.type,
+                  editInDegrees,
                   left: e.clientX - rect.left,
                   top: e.clientY - rect.top,
-                  draft:
-                    dim.value != null && Number.isFinite(dim.value)
-                      ? String(dim.value)
-                      : '',
+                  draft,
                 })
                 return
               }
             }
           }
         }
+
+        const sref = sketchSelectionRef.current ?? []
+        const ws = workspaceRef.current
+        const pmapW = new Map((ws.points ?? []).map((q) => [q.id, q]))
+
+        if (
+          sref.length === 2 &&
+          sref[0].kind === 'segment' &&
+          sref[1].kind === 'segment'
+        ) {
+          const s0 = ws.segments.find((s) => s.id === sref[0].id)
+          const s1 = ws.segments.find((s) => s.id === sref[1].id)
+          if (s0 && s1) {
+            const pa0 = pmapW.get(s0.a)
+            const pb0 = pmapW.get(s0.b)
+            const pa1 = pmapW.get(s1.a)
+            const pb1 = pmapW.get(s1.b)
+            if (pa0 && pb0 && pa1 && pb1) {
+              const u0x = pb0.x - pa0.x
+              const u0y = pb0.y - pa0.y
+              const u1x = pb1.x - pa1.x
+              const u1y = pb1.y - pa1.y
+              const L0 = Math.hypot(u0x, u0y)
+              const L1 = Math.hypot(u1x, u1y)
+              if (L0 > 1e-9 && L1 > 1e-9) {
+                const dot = (u0x * u1x + u0y * u1y) / (L0 * L1)
+                const ang = Math.acos(Math.min(1, Math.max(-1, Math.abs(dot))))
+                commit((d) => {
+                  const dims = d.dimensions ?? []
+                  if (
+                    dims.some(
+                      (dm) =>
+                        dm.type === 'angle' &&
+                        dm.targets?.length === 2 &&
+                        dm.targets[0]?.id === s0.id &&
+                        dm.targets[1]?.id === s1.id,
+                    )
+                  ) {
+                    return d
+                  }
+                  return {
+                    ...d,
+                    dimensions: [
+                      ...dims,
+                      {
+                        id: nextId('dim'),
+                        type: 'angle',
+                        value: ang,
+                        targets: [
+                          { kind: 'segment', id: s0.id },
+                          { kind: 'segment', id: s1.id },
+                        ],
+                      },
+                    ],
+                  }
+                })
+                return
+              }
+            }
+          }
+        }
+
+        if (sref.length === 1 && sref[0].kind === 'circle') {
+          const circ = ws.circles.find((c) => c.id === sref[0].id)
+          if (circ) {
+            const rc = circleWithResolvedCenter(circ, pmapW)
+            if (rc.r > 1e-9) {
+              commit((d) => {
+                const dims = d.dimensions ?? []
+                if (
+                  dims.some(
+                    (dm) =>
+                      dm.type === 'radius' && dm.targets?.[0] === circ.id,
+                  )
+                ) {
+                  return d
+                }
+                return {
+                  ...d,
+                  dimensions: [
+                    ...dims,
+                    {
+                      id: nextId('dim'),
+                      type: 'radius',
+                      value: rc.r,
+                      targets: [circ.id],
+                    },
+                  ],
+                }
+              })
+              return
+            }
+          }
+        }
+
+        if (sref.length === 1 && sref[0].kind === 'segment') {
+          const seg = ws.segments.find((s) => s.id === sref[0].id)
+          if (seg) {
+            const pa = pmapW.get(seg.a)
+            const pb = pmapW.get(seg.b)
+            if (pa && pb) {
+              const L = Math.hypot(pb.x - pa.x, pb.y - pa.y)
+              if (L > 1e-9) {
+                commit((d) => {
+                  const dims = d.dimensions ?? []
+                  if (
+                    dims.some(
+                      (dm) =>
+                        dm.type === 'distance' &&
+                        dm.targets?.[0] === seg.id,
+                    )
+                  ) {
+                    return d
+                  }
+                  return {
+                    ...d,
+                    dimensions: [
+                      ...dims,
+                      {
+                        id: nextId('dim'),
+                        type: 'distance',
+                        value: L,
+                        targets: [seg.id],
+                      },
+                    ],
+                  }
+                })
+                return
+              }
+            }
+          }
+        }
+
         const segsW = workspaceRef.current.segments ?? []
         const pmap = new Map(pts.map((q) => [q.id, q]))
         const hi = findNearestSegmentHit(segsW, pmap, wx, wy, tol)
@@ -2164,6 +2342,7 @@ export function WorkspaceCanvas({
       replaceSketchSelection,
       unionSketchSelection,
       setDimEdit,
+      labelDrawOptions,
     ],
   )
 
@@ -2851,7 +3030,15 @@ export function WorkspaceCanvas({
             }}
           >
             <label className="text-[10px] font-medium uppercase tracking-wide text-gg-muted">
-              Driving length
+              {dimEdit.dimType === 'angle' && dimEdit.editInDegrees
+                ? 'Driving angle (°)'
+                : dimEdit.dimType === 'angle'
+                  ? 'Driving angle (rad)'
+                  : dimEdit.dimType === 'radius'
+                    ? 'Driving radius'
+                    : dimEdit.dimType === 'diameter'
+                      ? 'Driving diameter'
+                      : 'Driving length'}
             </label>
             <input
               ref={dimInputRef}

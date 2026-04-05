@@ -14,6 +14,11 @@ import {
 } from './splineMath.js'
 import { drawConstraintDecorations } from './constraintDraw.js'
 import { DRIVING_DIM_OFFSET_WORLD } from './dimensionHitTest.js'
+import {
+  drawAngularDimension,
+  drawLinearDimension,
+  drawRadialDimension,
+} from './DimensionRenderer.js'
 
 const CANVAS_PALETTE = {
   dark: {
@@ -112,29 +117,6 @@ function drawWorldText(ctx, wx, wy, zoom, text, opts = {}) {
   ctx.textAlign = opts.align ?? 'center'
   ctx.textBaseline = opts.baseline ?? 'middle'
   ctx.fillText(text, dx, dy)
-  ctx.restore()
-}
-
-/**
- * High-contrast driving dimension text (readable on dark/light canvas).
- * @param {number} [syPx] vertical offset in screen px (after scale) e.g. -13 above anchor
- */
-function drawDrivingDimLabel(ctx, wx, wy, zoom, text, theme, pal, syPx = 0) {
-  const z = zoom || 1
-  ctx.save()
-  ctx.translate(wx, wy)
-  ctx.scale(1 / z, 1 / z)
-  ctx.font = 'bold 12px Inter, system-ui, sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  const isLight = theme === 'light'
-  ctx.lineJoin = 'round'
-  ctx.miterLimit = 2
-  ctx.lineWidth = 4
-  ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.92)' : 'rgba(15, 17, 23, 0.88)'
-  ctx.strokeText(text, 0, syPx)
-  ctx.fillStyle = isLight ? 'rgba(30, 64, 175, 0.98)' : 'rgba(253, 224, 71, 0.98)'
-  ctx.fillText(text, 0, syPx)
   ctx.restore()
 }
 
@@ -942,40 +924,125 @@ export function drawWorkspaceScene(ctx, p) {
     const unit = labelDrawOptions.worldUnit || 'u'
     const showDeg = labelDrawOptions.showAngleDegrees !== false
     for (const dim of dimensions) {
+      const v = dim.value
       if (dim.type === 'distance' && dim.targets?.[0]) {
         const seg = segments.find((s) => s.id === dim.targets[0])
         if (!seg) continue
         const a = pointById.get(seg.a)
         const b = pointById.get(seg.b)
         if (!a || !b) continue
-        const mx = (a.x + b.x) / 2
-        const my = (a.y + b.y) / 2
-        const dx = b.x - a.x
-        const dy = b.y - a.y
-        const len = Math.hypot(dx, dy)
-        if (len < 1e-12) continue
-        const nx = -dy / len
-        const ny = dx / len
-        const ox = mx + nx * DRIVING_DIM_OFFSET_WORLD
-        const oy = my + ny * DRIVING_DIM_OFFSET_WORLD
-        const v = dim.value
         const label =
           v != null && Number.isFinite(v)
             ? `${v.toFixed(2)} ${unit}`
             : `— ${unit}`
-        drawDrivingDimLabel(ctx, ox, oy, z, label, theme, pal)
-      } else if (dim.type === 'angle' && dim.targets?.length >= 3) {
-        const [idC] = dim.targets
+        drawLinearDimension(ctx, {
+          ax: a.x,
+          ay: a.y,
+          bx: b.x,
+          by: b.y,
+          zoom: z,
+          label,
+          theme,
+          offsetWorld: DRIVING_DIM_OFFSET_WORLD,
+        })
+      } else if (dim.type === 'radius' && dim.targets?.[0]) {
+        const c = circles.find((x) => x.id === dim.targets[0])
+        if (!c) continue
+        const rc = circleWithResolvedCenter(c, pointById)
+        const label =
+          v != null && Number.isFinite(v)
+            ? `R ${v.toFixed(2)} ${unit}`
+            : `R — ${unit}`
+        drawRadialDimension(ctx, {
+          cx: rc.cx,
+          cy: rc.cy,
+          r: rc.r,
+          zoom: z,
+          label,
+          theme,
+        })
+      } else if (dim.type === 'diameter' && dim.targets?.[0]) {
+        const c = circles.find((x) => x.id === dim.targets[0])
+        if (!c) continue
+        const rc = circleWithResolvedCenter(c, pointById)
+        const label =
+          v != null && Number.isFinite(v)
+            ? `Ø ${v.toFixed(2)} ${unit}`
+            : `Ø — ${unit}`
+        drawRadialDimension(ctx, {
+          cx: rc.cx,
+          cy: rc.cy,
+          r: rc.r,
+          zoom: z,
+          label,
+          theme,
+        })
+      } else if (dim.type === 'angle' && dim.targets?.length === 3) {
+        const [idC, idA, idB] = dim.targets
         const C = pointById.get(idC)
-        if (!C) continue
-        const v = dim.value
+        const A = pointById.get(idA)
+        const B = pointById.get(idB)
+        if (!C || !A || !B) continue
         let label = '—'
         if (v != null && Number.isFinite(v)) {
           label = showDeg
             ? `${((v * 180) / Math.PI).toFixed(1)}°`
             : `${v.toFixed(3)} rad`
         }
-        drawDrivingDimLabel(ctx, C.x, C.y, z, label, theme, pal, -14)
+        const a0 = Math.atan2(A.y - C.y, A.x - C.x)
+        const a1 = Math.atan2(B.y - C.y, B.x - C.x)
+        const da = Math.hypot(A.x - C.x, A.y - C.y)
+        const db = Math.hypot(B.x - C.x, B.y - C.y)
+        const rr = Math.min(da, db, 48) * 0.35
+        drawAngularDimension(ctx, {
+          vx: C.x,
+          vy: C.y,
+          r: Math.max(12 / z, rr),
+          a0,
+          a1,
+          zoom: z,
+          label,
+          theme,
+        })
+      } else if (
+        dim.type === 'angle' &&
+        dim.targets?.length === 2 &&
+        typeof dim.targets[0] === 'object'
+      ) {
+        const s0 = segments.find((s) => s.id === dim.targets[0].id)
+        const s1 = segments.find((s) => s.id === dim.targets[1].id)
+        if (!s0 || !s1) continue
+        const p00 = pointById.get(s0.a)
+        const p01 = pointById.get(s0.b)
+        const p10 = pointById.get(s1.a)
+        const p11 = pointById.get(s1.b)
+        if (!p00 || !p01 || !p10 || !p11) continue
+        const vx = (p00.x + p01.x + p10.x + p11.x) / 4
+        const vy = (p00.y + p01.y + p10.y + p11.y) / 4
+        const u0x = p01.x - p00.x
+        const u0y = p01.y - p00.y
+        const u1x = p11.x - p10.x
+        const u1y = p11.y - p10.y
+        const L0 = Math.hypot(u0x, u0y) || 1
+        const L1 = Math.hypot(u1x, u1y) || 1
+        const a0 = Math.atan2(u0y / L0, u0x / L0)
+        const a1 = Math.atan2(u1y / L1, u1x / L1)
+        let label = '—'
+        if (v != null && Number.isFinite(v)) {
+          label = showDeg
+            ? `${((v * 180) / Math.PI).toFixed(1)}°`
+            : `${v.toFixed(3)} rad`
+        }
+        drawAngularDimension(ctx, {
+          vx,
+          vy,
+          r: 28 / z,
+          a0,
+          a1,
+          zoom: z,
+          label,
+          theme,
+        })
       }
     }
   }

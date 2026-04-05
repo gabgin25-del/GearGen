@@ -1,11 +1,12 @@
 /**
- * Geometric constraint solver: damped Gauss–Newton on point coordinates to
- * satisfy sketch constraints and driving dimensions (residual least squares).
+ * Geometric constraint solver: prefers FreeCAD PlaneGCS (WASM); falls back to
+ * damped Gauss–Newton when PlaneGCS is unavailable or sketch uses unsupported relations.
  */
 
 import { recomputeBoundArcs } from './arcPointBindings.js'
 import { cloneWorkspaceData } from './workspaceReducer.js'
 import { relaxAllConstraints } from './sketchConstraintQuality.js'
+import { solveWithPlaneGcs } from './planeGcs/solvePlaneGcs.js'
 
 const DEFAULT_MAX_ITER = 42
 const DEFAULT_TOL = 1e-5
@@ -345,6 +346,18 @@ function applyDelta(d, delta, pointIds) {
  * @param {{ maxIter?: number; tol?: number }} [opts]
  */
 export function solveGCS(data, opts = {}) {
+  if ((data.points?.length ?? 0) > 0) {
+    const plane = solveWithPlaneGcs(data)
+    if (plane) return plane
+  }
+  return solveLegacyGCS(data, opts)
+}
+
+/**
+ * @param {object} data
+ * @param {{ maxIter?: number; tol?: number }} [opts]
+ */
+function solveLegacyGCS(data, opts = {}) {
   const maxIter = opts.maxIter ?? DEFAULT_MAX_ITER
   const tol = opts.tol ?? DEFAULT_TOL
   let d = cloneWorkspaceData(data)
@@ -357,7 +370,16 @@ export function solveGCS(data, opts = {}) {
 
   const hasWork =
     (d.constraints?.length ?? 0) > 0 || (d.dimensions?.length ?? 0) > 0
-  if (!hasWork) return recomputeBoundArcs(d)
+  if (!hasWork) {
+    d = recomputeBoundArcs(d)
+    d.solverDiagnostics = {
+      engine: 'legacy',
+      fullyDefined: false,
+      overConstrained: false,
+      dof: null,
+    }
+    return d
+  }
 
   let lambda = LAMBDA0
 
@@ -413,5 +435,11 @@ export function solveGCS(data, opts = {}) {
 
   d = relaxAllConstraints(d, 18)
   d = recomputeBoundArcs(d)
+  d.solverDiagnostics = {
+    engine: 'legacy',
+    fullyDefined: false,
+    overConstrained: false,
+    dof: null,
+  }
   return d
 }
