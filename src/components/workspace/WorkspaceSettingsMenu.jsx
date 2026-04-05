@@ -2,6 +2,7 @@ import { Settings, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { CollapsibleSection } from '../ui/CollapsibleSection.jsx'
 import { ErrorBoundary } from '../ui/ErrorBoundary.jsx'
+import { inferDistanceKind } from '../../lib/dimensionGeometry.js'
 import { SPLINE_TYPE_OPTIONS } from '../../hooks/useWorkspaceScene.js'
 import { WorkspaceOptions } from './WorkspaceOptions.jsx'
 
@@ -286,7 +287,7 @@ export function WorkspaceSettingsMenu({
                       checked={showDimensions}
                       onChange={(e) => setShowDimensions(e.target.checked)}
                     />
-                    Sketch dimensions (segment length &amp; radius on canvas)
+                    ANSI-style driving dimensions on canvas
                   </label>
                   <label className="flex cursor-pointer items-center gap-2 text-[12px] text-gg-text">
                     <input
@@ -309,10 +310,10 @@ export function WorkspaceSettingsMenu({
               >
                 {dimensions.length === 0 ? (
                   <p className="text-[11px] leading-snug text-gg-muted">
-                    Ruler tool next to Selection: click an edge to add a driving
-                    length. Labels match the canvas (e.g. 50.00{' '}
-                    {worldUnitLabel || 'u'}). Click a label on the sketch or edit
-                    below — both run the solver.
+                    Dimension tool: first pick an entity, second pick another
+                    (or the same segment for its length), move the mouse for the
+                    ghost preview, then click to place. Double-click a dimension
+                    in Select mode to edit. Values below drive PlaneGCS.
                   </p>
                 ) : (
                   <ul className="flex flex-col gap-2">
@@ -323,12 +324,34 @@ export function WorkspaceSettingsMenu({
                       >
                         <span className="text-[11px] font-medium text-gg-text">
                           {dim.type === 'distance'
-                            ? `Length · ${dim.value != null && Number.isFinite(dim.value) ? dim.value.toFixed(2) : '—'} ${worldUnitLabel || 'u'}`
-                            : showAngleDegrees
-                              ? `Angle · ${dim.value != null && Number.isFinite(dim.value) ? ((dim.value * 180) / Math.PI).toFixed(1) : '—'}°`
-                              : `Angle · ${dim.value != null && Number.isFinite(dim.value) ? dim.value.toFixed(3) : '—'} rad`}
+                            ? (() => {
+                                const k = inferDistanceKind(dim)
+                                const pfx =
+                                  k === 'parallelLines'
+                                    ? 'Line spacing'
+                                    : k === 'pointPoint'
+                                      ? 'Point distance'
+                                      : k === 'pointLine'
+                                        ? 'Point–line'
+                                        : 'Length'
+                                const v = dim.value
+                                const s =
+                                  v != null && Number.isFinite(v)
+                                    ? v.toFixed(2)
+                                    : '—'
+                                return `${pfx} · ${s} ${worldUnitLabel || 'u'}`
+                              })()
+                            : dim.type === 'radius'
+                              ? `Radius R · ${dim.value != null && Number.isFinite(dim.value) ? dim.value.toFixed(2) : '—'} ${worldUnitLabel || 'u'}`
+                              : dim.type === 'diameter'
+                                ? `Diameter Ø · ${dim.value != null && Number.isFinite(dim.value) ? dim.value.toFixed(2) : '—'} ${worldUnitLabel || 'u'}`
+                                : showAngleDegrees
+                                  ? `Angle · ${dim.value != null && Number.isFinite(dim.value) ? ((dim.value * 180) / Math.PI).toFixed(1) : '—'}°`
+                                  : `Angle · ${dim.value != null && Number.isFinite(dim.value) ? dim.value.toFixed(3) : '—'} rad`}
                         </span>
-                        {dim.type === 'distance' && (
+                        {(dim.type === 'distance' ||
+                          dim.type === 'radius' ||
+                          dim.type === 'diameter') && (
                           <label className="flex flex-col gap-0.5 text-[11px] text-gg-muted">
                             Value ({worldUnitLabel || 'u'})
                             <input

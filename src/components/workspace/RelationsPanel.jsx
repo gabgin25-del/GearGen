@@ -3,11 +3,12 @@ import {
   AlignJustify,
   ArrowDown,
   ArrowRight,
-  Columns2,
+  CircleDot,
   CornerDownRight,
   Equal,
   FlipHorizontal,
   Link2,
+  Minus,
   Ratio,
   Spline,
   Target,
@@ -22,6 +23,7 @@ const RELATION_ICON = {
   tangent: Spline,
   concentric: Target,
   coincident: Link2,
+  collinear: Minus,
   horizontal: ArrowRight,
   vertical: ArrowDown,
   symmetric: FlipHorizontal,
@@ -39,15 +41,21 @@ const btnClass =
  */
 export function RelationsPanel({ applySketchRelation }) {
   return (
-    <div className="flex flex-col gap-1 p-0">
+    <div className="flex flex-col gap-2 p-0">
+      <p className="text-[10px] leading-snug text-gg-muted">
+        SolidWorks-style sketch relations. Pick entities, then tap an icon.
+        Coincident includes point-on-line; Equal includes equal radius on two
+        circles.
+      </p>
       <div className="flex flex-row flex-wrap gap-1.5">
         {RELATION_TYPE_OPTIONS.map((o) => {
-          const Icon = RELATION_ICON[o.id] ?? Link2
+          const Icon = RELATION_ICON[o.id] ?? CircleDot
+          const desc = o.description ?? o.label
           return (
             <button
               key={o.id}
               type="button"
-              title={`${o.label} — apply to current selection`}
+              title={`${o.label} — ${desc}`}
               aria-label={o.label}
               onClick={() => applySketchRelation(o.id)}
               className={btnClass}

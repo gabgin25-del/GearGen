@@ -1,4 +1,5 @@
 import { recomputeBoundArcs } from './arcPointBindings.js'
+import { circleWithResolvedCenter } from './circleResolve.js'
 import { projectPointOnSegment } from './hitTest.js'
 
 /**
@@ -88,6 +89,15 @@ function moveCircleCenterTo(data, circleId, cx, cy) {
   }
 }
 
+function moveCircleRadiusTo(data, circleId, r) {
+  return {
+    ...data,
+    circles: data.circles.map((c) =>
+      c.id === circleId ? { ...c, r } : c,
+    ),
+  }
+}
+
 /**
  * @param {object} data workspace snapshot (points, segments, circles, …)
  * @param {{ type: string; targets?: { kind: string; id: string }[] }} constraint
@@ -102,12 +112,27 @@ export function applyConstraintEnforcement(data, constraint) {
 
   if (t === 'coincident' && targets.length === 2) {
     const [a, b] = targets
-    if (a.kind !== 'point' || b.kind !== 'point')
-      return recomputeBoundArcs(data)
-    const pa = data.points.find((p) => p.id === a.id)
-    const pb = data.points.find((p) => p.id === b.id)
-    if (!pa || !pb) return recomputeBoundArcs(data)
-    return recomputeBoundArcs(movePoint(data, b.id, pa.x, pa.y))
+    if (a.kind === 'point' && b.kind === 'point') {
+      const pa = data.points.find((p) => p.id === a.id)
+      const pb = data.points.find((p) => p.id === b.id)
+      if (!pa || !pb) return recomputeBoundArcs(data)
+      return recomputeBoundArcs(movePoint(data, b.id, pa.x, pa.y))
+    }
+    if (a.kind === 'point' && b.kind === 'segment') {
+      const ep = segEndpoints(data, b.id)
+      const p = data.points.find((q) => q.id === a.id)
+      if (!ep || !p) return recomputeBoundArcs(data)
+      const q = projectPointOnSegment(p.x, p.y, ep.pa.x, ep.pa.y, ep.pb.x, ep.pb.y)
+      return recomputeBoundArcs(movePoint(data, a.id, q.x, q.y))
+    }
+    if (a.kind === 'segment' && b.kind === 'point') {
+      const ep = segEndpoints(data, a.id)
+      const p = data.points.find((q) => q.id === b.id)
+      if (!ep || !p) return recomputeBoundArcs(data)
+      const q = projectPointOnSegment(p.x, p.y, ep.pa.x, ep.pa.y, ep.pb.x, ep.pb.y)
+      return recomputeBoundArcs(movePoint(data, b.id, q.x, q.y))
+    }
+    return recomputeBoundArcs(data)
   }
 
   if (
@@ -185,6 +210,22 @@ export function applyConstraintEnforcement(data, constraint) {
     if (!ep) return recomputeBoundArcs(data)
     return recomputeBoundArcs(
       movePoint(data, ep.seg.b, ep.pa.x, ep.pb.y),
+    )
+  }
+
+  if (
+    t === 'equal' &&
+    targets.length === 2 &&
+    targets[0].kind === 'circle' &&
+    targets[1].kind === 'circle'
+  ) {
+    const c0 = data.circles.find((c) => c.id === targets[0].id)
+    const c1 = data.circles.find((c) => c.id === targets[1].id)
+    if (!c0 || !c1) return recomputeBoundArcs(data)
+    const ptMap = new Map(data.points.map((p) => [p.id, p]))
+    const r0 = circleWithResolvedCenter(c0, ptMap).r
+    return recomputeBoundArcs(
+      moveCircleRadiusTo(data, c1.id, r0),
     )
   }
 
@@ -316,6 +357,62 @@ export function applyConstraintEnforcement(data, constraint) {
     const ncx = cx + nx * (targetDist - dist)
     const ncy = cy + ny * (targetDist - dist)
     return recomputeBoundArcs(moveCircleCenterTo(data, c.id, ncx, ncy))
+  }
+
+  if (
+    t === 'tangent' &&
+    targets.length === 2 &&
+    targets[0].kind === 'circle' &&
+    targets[1].kind === 'circle'
+  ) {
+    const c0 = data.circles.find((x) => x.id === targets[0].id)
+    const c1 = data.circles.find((x) => x.id === targets[1].id)
+    if (!c0 || !c1) return recomputeBoundArcs(data)
+    const ptMap = new Map(data.points.map((p) => [p.id, p]))
+    const r0 = circleWithResolvedCenter(c0, ptMap).r
+    const r1 = circleWithResolvedCenter(c1, ptMap).r
+    const p0 = c0.centerId ? ptMap.get(c0.centerId) : null
+    const p1 = c1.centerId ? ptMap.get(c1.centerId) : null
+    const x0 = p0 ? p0.x : c0.cx ?? 0
+    const y0 = p0 ? p0.y : c0.cy ?? 0
+    const x1 = p1 ? p1.x : c1.cx ?? 0
+    const y1 = p1 ? p1.y : c1.cy ?? 0
+    const dx = x1 - x0
+    const dy = y1 - y0
+    const d = Math.hypot(dx, dy)
+    if (d < 1e-9) return recomputeBoundArcs(data)
+    const ux = dx / d
+    const uy = dy / d
+    const want = r0 + r1
+    const ncx = x0 + ux * want
+    const ncy = y0 + uy * want
+    return recomputeBoundArcs(moveCircleCenterTo(data, c1.id, ncx, ncy))
+  }
+
+  if (
+    t === 'collinear' &&
+    targets.length === 2 &&
+    targets[0].kind === 'segment' &&
+    targets[1].kind === 'segment'
+  ) {
+    const seg0 = data.segments.find((s) => s.id === targets[0].id)
+    const seg1 = data.segments.find((s) => s.id === targets[1].id)
+    if (!seg0 || !seg1) return recomputeBoundArcs(data)
+    let d = applyConstraintEnforcement(data, {
+      type: 'parallel',
+      targets: [
+        { kind: 'segment', id: seg0.id },
+        { kind: 'segment', id: seg1.id },
+      ],
+    })
+    d = applyConstraintEnforcement(d, {
+      type: 'pointOnSegment',
+      targets: [
+        { kind: 'point', id: seg1.a },
+        { kind: 'segment', id: seg0.id },
+      ],
+    })
+    return d
   }
 
   if (

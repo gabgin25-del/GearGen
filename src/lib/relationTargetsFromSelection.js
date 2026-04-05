@@ -48,7 +48,20 @@ export function relationTargetsFromSelection(type, selection, data) {
     case 'fixOrigin':
       if (pts.length < 1) return null
       return [{ kind: 'point', id: pts[0].id }]
-    case 'equal':
+    case 'equal': {
+      if (circs.length >= 2) {
+        return [
+          { kind: 'circle', id: circs[0].id },
+          { kind: 'circle', id: circs[1].id },
+        ]
+      }
+      const pair = resolveTwoSegmentIds()
+      if (!pair) return null
+      return [
+        { kind: 'segment', id: pair[0] },
+        { kind: 'segment', id: pair[1] },
+      ]
+    }
     case 'parallel':
     case 'perpendicular':
     case 'symmetric':
@@ -60,7 +73,21 @@ export function relationTargetsFromSelection(type, selection, data) {
         { kind: 'segment', id: pair[1] },
       ]
     }
+    case 'collinear': {
+      const pair = resolveTwoSegmentIds()
+      if (!pair) return null
+      return [
+        { kind: 'segment', id: pair[0] },
+        { kind: 'segment', id: pair[1] },
+      ]
+    }
     case 'tangent': {
+      if (circs.length >= 2) {
+        return [
+          { kind: 'circle', id: circs[0].id },
+          { kind: 'circle', id: circs[1].id },
+        ]
+      }
       if (segs.length >= 1 && circs.length >= 1) {
         return [
           { kind: 'segment', id: segs[0].id },
@@ -90,12 +117,21 @@ export function relationTargetsFromSelection(type, selection, data) {
         { kind: 'circle', id: circs[0].id },
         { kind: 'circle', id: circs[1].id },
       ]
-    case 'coincident':
-      if (pts.length < 2) return null
-      return [
-        { kind: 'point', id: pts[0].id },
-        { kind: 'point', id: pts[1].id },
-      ]
+    case 'coincident': {
+      if (pts.length >= 1 && segs.length >= 1) {
+        return [
+          { kind: 'point', id: pts[0].id },
+          { kind: 'segment', id: segs[0].id },
+        ]
+      }
+      if (pts.length >= 2) {
+        return [
+          { kind: 'point', id: pts[0].id },
+          { kind: 'point', id: pts[1].id },
+        ]
+      }
+      return null
+    }
     default:
       return null
   }

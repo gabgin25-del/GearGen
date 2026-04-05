@@ -116,7 +116,34 @@ export function deleteSketchEntities(data, selection) {
 
   const dimensions = (data.dimensions ?? []).filter((dim) => {
     const t = dim.targets ?? []
-    if (dim.type === 'distance' && t[0]) {
+    if (dim.type === 'distance' && t.length === 2) {
+      if (typeof t[0] === 'string' && typeof t[1] === 'string') {
+        return (
+          points.some((p) => p.id === t[0]) &&
+          points.some((p) => p.id === t[1])
+        )
+      }
+      if (t[0]?.kind === 'segment' && t[1]?.kind === 'segment') {
+        return (
+          segments.some((s) => s.id === t[0].id) &&
+          segments.some((s) => s.id === t[1].id)
+        )
+      }
+      if (
+        (t[0]?.kind === 'point' && t[1]?.kind === 'segment') ||
+        (t[0]?.kind === 'segment' && t[1]?.kind === 'point')
+      ) {
+        const pid =
+          t[0].kind === 'point' ? t[0].id : t[1].id
+        const sid =
+          t[0].kind === 'segment' ? t[0].id : t[1].id
+        return (
+          points.some((p) => p.id === pid) &&
+          segments.some((s) => s.id === sid)
+        )
+      }
+    }
+    if (dim.type === 'distance' && typeof t[0] === 'string') {
       return segments.some((s) => s.id === t[0])
     }
     if (

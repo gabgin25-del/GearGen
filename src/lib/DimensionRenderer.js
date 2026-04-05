@@ -1,10 +1,16 @@
 /**
  * ANSI-style dimension graphics (extension lines, 3:1 arrowheads, gap from geometry).
  * World-space drawing; caller sets ctx transform (pan/zoom) already applied.
+ *
+ * Gap / overshoot per typical inch–metric lecture conversions (~1/16" ≈ 1.5 mm, ~1/8" ≈ 3 mm),
+ * expressed in sketch world units (treat 1 unit ≈ 1 mm for readable prints).
  */
 
-const EXT_GAP = 4
-const EXT_OVERHANG = 10
+/** Visible gap from object to extension line start. */
+export const ANSI_EXT_GAP_WORLD = 1.5
+/** Extension line extends past the dimension line. */
+export const ANSI_EXT_OVERSHOOT_WORLD = 3
+
 const ARROW_LEN = 9
 const ARROW_WIDTH = ARROW_LEN / 3
 
@@ -69,8 +75,8 @@ export function drawLinearDimension(ctx, o) {
 
   const ux = dx / len
   const uy = dy / len
-  const gap = EXT_GAP / z
-  const ext = EXT_OVERHANG / z
+  const gap = ANSI_EXT_GAP_WORLD
+  const ext = ANSI_EXT_OVERSHOOT_WORLD
 
   const a1x = ax + ux * gap + nx
   const a1y = ay + uy * gap + ny
@@ -102,7 +108,7 @@ export function drawLinearDimension(ctx, o) {
 
   const midx = (a1x + a2x) / 2
   const midy = (a1y + a2y) / 2
-  const needBreak = len > 42 / z
+  const needBreak = len > 12 / z
 
   ctx.strokeStyle = dimTint
   ctx.lineWidth = Math.max(0.5, 0.75 / z)
@@ -156,7 +162,7 @@ export function drawRadialDimension(ctx, o) {
   if (r < 1e-6) return
   const ux = 1
   const uy = 0
-  const gap = EXT_GAP / z
+  const gap = ANSI_EXT_GAP_WORLD
   const p0x = cx + ux * (r + gap)
   const p0y = cy + uy * (r + gap)
   const p1x = cx + ux * (r + gap + ARROW_LEN / z + 22 / z)

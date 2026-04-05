@@ -13,6 +13,7 @@ import {
   splineVertexRole,
 } from './splineMath.js'
 import { drawConstraintDecorations } from './constraintDraw.js'
+import { linearDistanceAnchorPoints } from './dimensionGeometry.js'
 import { DRIVING_DIM_OFFSET_WORLD } from './dimensionHitTest.js'
 import {
   drawAngularDimension,
@@ -925,25 +926,26 @@ export function drawWorkspaceScene(ctx, p) {
     const showDeg = labelDrawOptions.showAngleDegrees !== false
     for (const dim of dimensions) {
       const v = dim.value
-      if (dim.type === 'distance' && dim.targets?.[0]) {
-        const seg = segments.find((s) => s.id === dim.targets[0])
-        if (!seg) continue
-        const a = pointById.get(seg.a)
-        const b = pointById.get(seg.b)
-        if (!a || !b) continue
+      if (dim.type === 'distance') {
+        const anchors = linearDistanceAnchorPoints(dim, {
+          points,
+          segments,
+          circles,
+        })
+        if (!anchors) continue
         const label =
           v != null && Number.isFinite(v)
             ? `${v.toFixed(2)} ${unit}`
             : `— ${unit}`
         drawLinearDimension(ctx, {
-          ax: a.x,
-          ay: a.y,
-          bx: b.x,
-          by: b.y,
+          ax: anchors.ax,
+          ay: anchors.ay,
+          bx: anchors.bx,
+          by: anchors.by,
           zoom: z,
           label,
           theme,
-          offsetWorld: DRIVING_DIM_OFFSET_WORLD,
+          offsetWorld: dim.offsetWorld ?? DRIVING_DIM_OFFSET_WORLD,
         })
       } else if (dim.type === 'radius' && dim.targets?.[0]) {
         const c = circles.find((x) => x.id === dim.targets[0])
@@ -1376,6 +1378,52 @@ export function drawWorkspaceScene(ctx, p) {
       ctx.stroke()
       drawAngleDecorations(ctx, C, aa, sweep, markR, z, pal)
       }
+    } else if (preview.kind === 'linearDimension') {
+      ctx.save()
+      ctx.globalAlpha = 0.78
+      ctx.setLineDash([4 / z, 5 / z])
+      drawLinearDimension(ctx, {
+        ax: preview.ax,
+        ay: preview.ay,
+        bx: preview.bx,
+        by: preview.by,
+        zoom: z,
+        label: preview.label ?? '',
+        theme,
+        offsetWorld:
+          preview.offsetWorld != null
+            ? preview.offsetWorld
+            : DRIVING_DIM_OFFSET_WORLD,
+      })
+      ctx.restore()
+    } else if (preview.kind === 'angularDimension') {
+      ctx.save()
+      ctx.globalAlpha = 0.78
+      ctx.setLineDash([4 / z, 5 / z])
+      drawAngularDimension(ctx, {
+        vx: preview.vx,
+        vy: preview.vy,
+        r: preview.r,
+        a0: preview.a0,
+        a1: preview.a1,
+        zoom: z,
+        label: preview.label ?? '—',
+        theme,
+      })
+      ctx.restore()
+    } else if (preview.kind === 'radialDimension') {
+      ctx.save()
+      ctx.globalAlpha = 0.78
+      ctx.setLineDash([4 / z, 5 / z])
+      drawRadialDimension(ctx, {
+        cx: preview.cx,
+        cy: preview.cy,
+        r: preview.r,
+        zoom: z,
+        label: preview.label ?? '',
+        theme,
+      })
+      ctx.restore()
     }
     ctx.restore()
   }

@@ -50,12 +50,42 @@ export function constraintSatisfied(data, c) {
 
   if (t === 'coincident' && targets.length === 2) {
     const [a, b] = targets
-    if (a.kind !== 'point' || b.kind !== 'point') return true
     const m = ptMap(data)
-    const pa = m.get(a.id)
-    const pb = m.get(b.id)
-    if (!pa || !pb) return false
-    return Math.hypot(pb.x - pa.x, pb.y - pa.y) <= PT_TOL
+    if (a.kind === 'point' && b.kind === 'point') {
+      const pa = m.get(a.id)
+      const pb = m.get(b.id)
+      if (!pa || !pb) return false
+      return Math.hypot(pb.x - pa.x, pb.y - pa.y) <= PT_TOL
+    }
+    if (a.kind === 'point' && b.kind === 'segment') {
+      const p = m.get(a.id)
+      const ep = segEndpoints(data, b.id)
+      if (!p || !ep) return false
+      const d = distPointToSegment(
+        p.x,
+        p.y,
+        ep.pa.x,
+        ep.pa.y,
+        ep.pb.x,
+        ep.pb.y,
+      )
+      return d <= PT_TOL * 8
+    }
+    if (a.kind === 'segment' && b.kind === 'point') {
+      const p = m.get(b.id)
+      const ep = segEndpoints(data, a.id)
+      if (!p || !ep) return false
+      const d = distPointToSegment(
+        p.x,
+        p.y,
+        ep.pa.x,
+        ep.pa.y,
+        ep.pb.x,
+        ep.pb.y,
+      )
+      return d <= PT_TOL * 8
+    }
+    return true
   }
 
   if (
@@ -115,10 +145,50 @@ export function constraintSatisfied(data, c) {
   }
 
   if (t === 'equal' && targets.length === 2) {
+    if (targets[0].kind === 'circle' && targets[1].kind === 'circle') {
+      const m = ptMap(data)
+      const c0 = data.circles.find((c) => c.id === targets[0].id)
+      const c1 = data.circles.find((c) => c.id === targets[1].id)
+      if (!c0 || !c1) return false
+      const r0 = circleWithResolvedCenter(c0, m).r
+      const r1 = circleWithResolvedCenter(c1, m).r
+      return Math.abs(r0 - r1) <= LEN_TOL
+    }
     const L0 = segLen(data, targets[0].id)
     const L1 = segLen(data, targets[1].id)
     if (L0 == null || L1 == null) return false
     return Math.abs(L0 - L1) <= LEN_TOL
+  }
+
+  if (
+    t === 'collinear' &&
+    targets.length === 2 &&
+    targets[0].kind === 'segment' &&
+    targets[1].kind === 'segment'
+  ) {
+    const e0 = segEndpoints(data, targets[0].id)
+    const e1 = segEndpoints(data, targets[1].id)
+    if (!e0 || !e1) return false
+    const dx0 = e0.pb.x - e0.pa.x
+    const dy0 = e0.pb.y - e0.pa.y
+    const dx1 = e1.pb.x - e1.pa.x
+    const dy1 = e1.pb.y - e1.pa.y
+    const L0 = Math.hypot(dx0, dy0)
+    const L1 = Math.hypot(dx1, dy1)
+    if (L0 < 1e-9 || L1 < 1e-9) return false
+    const cross = dx0 * dy1 - dy0 * dx1
+    if (Math.abs(cross) / (L0 * L1) > ANG_TOL) return false
+    const p = ptMap(data).get(e1.seg.a)
+    if (!p) return false
+    const d = distPointToSegment(
+      p.x,
+      p.y,
+      e0.pa.x,
+      e0.pa.y,
+      e0.pb.x,
+      e0.pb.y,
+    )
+    return d <= PT_TOL * 10
   }
 
   if (t === 'horizontal' && targets.length === 1) {
@@ -179,6 +249,22 @@ export function constraintSatisfied(data, c) {
     if (L0 < 1e-9 || L1 < 1e-9) return false
     const cross = dx0 * dy1 - dy0 * dx1
     return Math.abs(cross) <= ANG_TOL * L0 * L1
+  }
+
+  if (
+    t === 'tangent' &&
+    targets.length === 2 &&
+    targets[0].kind === 'circle' &&
+    targets[1].kind === 'circle'
+  ) {
+    const m = ptMap(data)
+    const c0 = data.circles.find((x) => x.id === targets[0].id)
+    const c1 = data.circles.find((x) => x.id === targets[1].id)
+    if (!c0 || !c1) return false
+    const rc0 = circleWithResolvedCenter(c0, m)
+    const rc1 = circleWithResolvedCenter(c1, m)
+    const dcent = Math.hypot(rc1.cx - rc0.cx, rc1.cy - rc0.cy)
+    return Math.abs(dcent - (rc0.r + rc1.r)) <= LEN_TOL
   }
 
   if (
@@ -271,8 +357,21 @@ function sameConstraintTargets(a, b) {
   const ta = a.targets ?? []
   const tb = b.targets ?? []
   if (ta.length !== tb.length) return false
-  const ka = ta.map((x) => `${x.kind}:${x.id}`).sort()
-  const kb = tb.map((x) => `${x.kind}:${x.id}`).sort()
+  const norm = (t) => {
+    if (
+      a.type === 'coincident' &&
+      t.length === 2 &&
+      t[0].kind === 'segment' &&
+      t[1].kind === 'point'
+    ) {
+      return [t[1], t[0]]
+    }
+    return t
+  }
+  const taN = norm(ta)
+  const tbN = norm(tb)
+  const ka = taN.map((x) => `${x.kind}:${x.id}`).sort()
+  const kb = tbN.map((x) => `${x.kind}:${x.id}`).sort()
   if (!ka.every((s, i) => s === kb[i])) return false
   if (a.type === 'similar') {
     const ra = a.ratio

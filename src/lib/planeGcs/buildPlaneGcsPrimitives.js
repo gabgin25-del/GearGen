@@ -4,8 +4,27 @@
  */
 
 import { circleWithResolvedCenter } from '../circleResolve.js'
+import { inferDistanceKind } from '../dimensionGeometry.js'
 
-const LEGACY_ONLY = new Set(['tangent', 'similar', 'symmetric'])
+/**
+ * Whole-sketch fallback to legacy Gauss–Newton when PlaneGCS mapping is incomplete.
+ */
+function workspaceRequiresLegacySolver(data) {
+  for (const c of data.constraints ?? []) {
+    if (c.type === 'similar' || c.type === 'symmetric') return true
+    if (c.type === 'tangent') {
+      const t = c.targets ?? []
+      if (
+        t.length === 2 &&
+        t[0]?.kind === 'segment' &&
+        t[1]?.kind === 'segment'
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
 
 /** @param {string} segId */
 export function linePrimitiveId(segId) {
@@ -22,10 +41,8 @@ export function circlePrimitiveId(circleId) {
  * @returns {object[] | null} primitives + params, or null to use legacy solver
  */
 export function buildPlaneGcsPrimitives(data) {
+  if (workspaceRequiresLegacySolver(data)) return null
   const constraints = data.constraints ?? []
-  for (const c of constraints) {
-    if (LEGACY_ONLY.has(c.type)) return null
-  }
 
   const points = data.points ?? []
   const segments = data.segments ?? []
@@ -47,7 +64,7 @@ export function buildPlaneGcsPrimitives(data) {
 
   for (const dim of dimensions) {
     const pname = `dim_${dim.id}`
-    if (dim.type === 'distance' && dim.targets?.[0]) {
+    if (dim.type === 'distance' && (dim.targets?.length ?? 0) > 0) {
       const v = dim.value
       if (v != null && Number.isFinite(v) && v > 0) {
         out.push({ type: 'param', name: pname, value: v })
@@ -131,19 +148,40 @@ export function buildPlaneGcsPrimitives(data) {
       continue
     }
 
-    if (
-      c.type === 'coincident' &&
-      t.length === 2 &&
-      t[0].kind === 'point' &&
-      t[1].kind === 'point'
-    ) {
-      out.push({
-        id: nextCid('coin'),
-        type: 'p2p_coincident',
-        p1_id: t[0].id,
-        p2_id: t[1].id,
-      })
-      continue
+    if (c.type === 'coincident' && t.length === 2) {
+      if (t[0].kind === 'point' && t[1].kind === 'point') {
+        out.push({
+          id: nextCid('coin'),
+          type: 'p2p_coincident',
+          p1_id: t[0].id,
+          p2_id: t[1].id,
+        })
+        continue
+      }
+      if (t[0].kind === 'point' && t[1].kind === 'segment') {
+        const seg = segments.find((s) => s.id === t[1].id)
+        if (!seg) continue
+        out.push({
+          id: nextCid('coinpl'),
+          type: 'point_on_line_ppp',
+          p_id: t[0].id,
+          lp1_id: seg.a,
+          lp2_id: seg.b,
+        })
+        continue
+      }
+      if (t[0].kind === 'segment' && t[1].kind === 'point') {
+        const seg = segments.find((s) => s.id === t[0].id)
+        if (!seg) continue
+        out.push({
+          id: nextCid('coinpl'),
+          type: 'point_on_line_ppp',
+          p_id: t[1].id,
+          lp1_id: seg.a,
+          lp2_id: seg.b,
+        })
+        continue
+      }
     }
 
     if (
@@ -269,17 +307,78 @@ export function buildPlaneGcsPrimitives(data) {
       continue
     }
 
+    if (c.type === 'equal' && t.length === 2) {
+      if (t[0].kind === 'segment' && t[1].kind === 'segment') {
+        out.push({
+          id: nextCid('eq'),
+          type: 'equal_length',
+          l1_id: linePrimitiveId(t[0].id),
+          l2_id: linePrimitiveId(t[1].id),
+        })
+        continue
+      }
+      if (t[0].kind === 'circle' && t[1].kind === 'circle') {
+        out.push({
+          id: nextCid('eqr'),
+          type: 'equal_radius_cc',
+          c1_id: circlePrimitiveId(t[0].id),
+          c2_id: circlePrimitiveId(t[1].id),
+        })
+        continue
+      }
+    }
+
     if (
-      c.type === 'equal' &&
+      c.type === 'collinear' &&
       t.length === 2 &&
       t[0].kind === 'segment' &&
       t[1].kind === 'segment'
     ) {
+      const s0 = segments.find((s) => s.id === t[0].id)
+      const s1 = segments.find((s) => s.id === t[1].id)
+      if (!s0 || !s1) continue
       out.push({
-        id: nextCid('eq'),
-        type: 'equal_length',
+        id: nextCid('coll_p'),
+        type: 'parallel',
         l1_id: linePrimitiveId(t[0].id),
         l2_id: linePrimitiveId(t[1].id),
+      })
+      out.push({
+        id: nextCid('coll_on'),
+        type: 'point_on_line_ppp',
+        p_id: s1.a,
+        lp1_id: s0.a,
+        lp2_id: s0.b,
+      })
+      continue
+    }
+
+    if (
+      c.type === 'tangent' &&
+      t.length === 2 &&
+      t[0].kind === 'segment' &&
+      t[1].kind === 'circle'
+    ) {
+      out.push({
+        id: nextCid('tan_lc'),
+        type: 'tangent_lc',
+        l_id: linePrimitiveId(t[0].id),
+        c_id: circlePrimitiveId(t[1].id),
+      })
+      continue
+    }
+
+    if (
+      c.type === 'tangent' &&
+      t.length === 2 &&
+      t[0].kind === 'circle' &&
+      t[1].kind === 'circle'
+    ) {
+      out.push({
+        id: nextCid('tan_cc'),
+        type: 'tangent_cc',
+        c1_id: circlePrimitiveId(t[0].id),
+        c2_id: circlePrimitiveId(t[1].id),
       })
       continue
     }
@@ -305,20 +404,83 @@ export function buildPlaneGcsPrimitives(data) {
 
   for (const dim of dimensions) {
     const pname = `dim_${dim.id}`
-    if (dim.type === 'distance' && dim.targets?.[0]) {
-      const seg = segments.find((s) => s.id === dim.targets[0])
-      if (!seg) continue
+    if (dim.type === 'distance') {
       const v = dim.value
       if (v == null || !Number.isFinite(v) || v <= 0) continue
-      out.push({
-        id: nextCid('dlen'),
-        type: 'p2p_distance',
-        p1_id: seg.a,
-        p2_id: seg.b,
-        distance: pname,
-        driving: true,
-      })
-      continue
+      const t = dim.targets ?? []
+      const dk = inferDistanceKind(dim)
+
+      if (dk === 'pointPoint' && t.length === 2) {
+        const p1 = t[0]
+        const p2 = t[1]
+        if (typeof p1 !== 'string' || typeof p2 !== 'string') continue
+        out.push({
+          id: nextCid('dpp'),
+          type: 'p2p_distance',
+          p1_id: p1,
+          p2_id: p2,
+          distance: pname,
+          driving: true,
+        })
+        continue
+      }
+
+      if (dk === 'pointLine' && t.length === 2) {
+        let pid
+        let segId
+        if (t[0]?.kind === 'point' && t[1]?.kind === 'segment') {
+          pid = t[0].id
+          segId = t[1].id
+        } else if (t[0]?.kind === 'segment' && t[1]?.kind === 'point') {
+          pid = t[1].id
+          segId = t[0].id
+        } else continue
+        const seg = segments.find((s) => s.id === segId)
+        if (!seg) continue
+        out.push({
+          id: nextCid('dp2l'),
+          type: 'p2l_distance',
+          p_id: pid,
+          l_id: linePrimitiveId(segId),
+          distance: pname,
+          driving: true,
+        })
+        continue
+      }
+
+      if (
+        dk === 'parallelLines' &&
+        t.length === 2 &&
+        t[0]?.kind === 'segment' &&
+        t[1]?.kind === 'segment'
+      ) {
+        const s0 = segments.find((s) => s.id === t[0].id)
+        const s1 = segments.find((s) => s.id === t[1].id)
+        if (!s0 || !s1) continue
+        out.push({
+          id: nextCid('dpl'),
+          type: 'p2l_distance',
+          p_id: s0.a,
+          l_id: linePrimitiveId(s1.id),
+          distance: pname,
+          driving: true,
+        })
+        continue
+      }
+
+      if (dk === 'segment' && typeof t[0] === 'string') {
+        const seg = segments.find((s) => s.id === t[0])
+        if (!seg) continue
+        out.push({
+          id: nextCid('dlen'),
+          type: 'p2p_distance',
+          p1_id: seg.a,
+          p2_id: seg.b,
+          distance: pname,
+          driving: true,
+        })
+        continue
+      }
     }
     if (dim.type === 'radius' && dim.targets?.[0]) {
       const cid = circlePrimitiveId(dim.targets[0])

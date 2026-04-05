@@ -40,6 +40,14 @@ import {
   pointInPolygon,
 } from '../../lib/hitTest.js'
 import { circleWithResolvedCenter } from '../../lib/circleResolve.js'
+import {
+  linearDimensionOffsetFromCursor,
+} from '../../lib/dimensionGeometry.js'
+import {
+  pickDimensionEntity,
+  radiusDimensionDraftFromCircle,
+  resolveDimensionFromTwoPicks,
+} from '../../lib/dimensionPick.js'
 import { hitDrivingDimension } from '../../lib/dimensionHitTest.js'
 import { sampleSplinePolyline } from '../../lib/splineMath.js'
 import {
@@ -404,6 +412,9 @@ export function WorkspaceCanvas({
   const setDrivingDimRef = useRef(setDrivingDimensionValue)
   const sketchSelectionRef = useRef(sketchSelection)
   const sketchLockStateRef = useRef(sketchLockState)
+  const labelDrawOptionsRef = useRef(labelDrawOptions)
+  /** @type {React.MutableRefObject<null | { phase: string; [k: string]: unknown }>} */
+  const dimPlacementRef = useRef(null)
   const { ref: containerRef, size } = useElementSize()
   const canvasRef = useRef(null)
   const marqueeOverlayRef = useRef(null)
@@ -516,6 +527,10 @@ export function WorkspaceCanvas({
   }, [sketchSelection])
 
   useEffect(() => {
+    labelDrawOptionsRef.current = labelDrawOptions
+  }, [labelDrawOptions])
+
+  useEffect(() => {
     setDrivingDimRef.current = setDrivingDimensionValue
   }, [setDrivingDimensionValue])
 
@@ -531,6 +546,62 @@ export function WorkspaceCanvas({
     })
     return () => cancelAnimationFrame(id)
   }, [dimEdit])
+
+  const onCanvasDoubleClick = useCallback(
+    (e) => {
+      if (tool !== TOOL.SELECT || !setDrivingDimensionValue) return
+      const canvas = canvasRef.current
+      if (!canvas) return
+      e.preventDefault()
+      const p = panRef.current
+      const opt = placementRef.current
+      const { x: lx, y: ly } = canvasLocalFromClient(
+        canvas,
+        e.clientX,
+        e.clientY,
+      )
+      const wx = (lx - p.x) / opt.zoom
+      const wy = (ly - p.y) / opt.zoom
+      const dimPickId = hitDrivingDimension(
+        wx,
+        wy,
+        workspaceRef.current,
+        Math.max(40 / opt.zoom, 5),
+        opt.zoom,
+      )
+      if (!dimPickId) return
+      const dim = (workspaceRef.current.dimensions ?? []).find(
+        (d) => d.id === dimPickId,
+      )
+      if (
+        dim?.type !== 'distance' &&
+        dim?.type !== 'radius' &&
+        dim?.type !== 'diameter' &&
+        dim?.type !== 'angle'
+      ) {
+        return
+      }
+      const rect = containerRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const showDeg = labelDrawOptions?.showAngleDegrees !== false
+      const editInDegrees = dim.type === 'angle' && showDeg
+      let draft = ''
+      if (dim.value != null && Number.isFinite(dim.value)) {
+        draft = editInDegrees
+          ? String((dim.value * 180) / Math.PI)
+          : String(dim.value)
+      }
+      setDimEdit({
+        id: dimPickId,
+        dimType: dim.type,
+        editInDegrees,
+        left: e.clientX - rect.left,
+        top: e.clientY - rect.top,
+        draft,
+      })
+    },
+    [tool, setDrivingDimensionValue, labelDrawOptions],
+  )
 
   const commitDimEdit = useCallback(() => {
     const cur = dimEditRef.current
@@ -564,6 +635,7 @@ export function WorkspaceCanvas({
     toolRef.current = tool
     patchDraft(null)
     setPreview(null)
+    if (tool !== TOOL.DIMENSION) dimPlacementRef.current = null
   }, [tool, patchDraft, setPreview])
 
   useEffect(() => {
@@ -767,6 +839,12 @@ export function WorkspaceCanvas({
           e.preventDefault()
           dimEditRef.current = null
           setDimEdit(null)
+          return
+        }
+        if (dimPlacementRef.current && toolRef.current === TOOL.DIMENSION) {
+          e.preventDefault()
+          dimPlacementRef.current = null
+          setPreview(null)
           return
         }
         cancelOriginPick?.()
@@ -1329,171 +1407,158 @@ export function WorkspaceCanvas({
           }
         }
 
-        const sref = sketchSelectionRef.current ?? []
         const ws = workspaceRef.current
-        const pmapW = new Map((ws.points ?? []).map((q) => [q.id, q]))
+        const dstate = dimPlacementRef.current
 
-        if (
-          sref.length === 2 &&
-          sref[0].kind === 'segment' &&
-          sref[1].kind === 'segment'
-        ) {
-          const s0 = ws.segments.find((s) => s.id === sref[0].id)
-          const s1 = ws.segments.find((s) => s.id === sref[1].id)
-          if (s0 && s1) {
-            const pa0 = pmapW.get(s0.a)
-            const pb0 = pmapW.get(s0.b)
-            const pa1 = pmapW.get(s1.a)
-            const pb1 = pmapW.get(s1.b)
-            if (pa0 && pb0 && pa1 && pb1) {
-              const u0x = pb0.x - pa0.x
-              const u0y = pb0.y - pa0.y
-              const u1x = pb1.x - pa1.x
-              const u1y = pb1.y - pa1.y
-              const L0 = Math.hypot(u0x, u0y)
-              const L1 = Math.hypot(u1x, u1y)
-              if (L0 > 1e-9 && L1 > 1e-9) {
-                const dot = (u0x * u1x + u0y * u1y) / (L0 * L1)
-                const ang = Math.acos(Math.min(1, Math.max(-1, Math.abs(dot))))
-                commit((d) => {
-                  const dims = d.dimensions ?? []
-                  if (
-                    dims.some(
-                      (dm) =>
-                        dm.type === 'angle' &&
-                        dm.targets?.length === 2 &&
-                        dm.targets[0]?.id === s0.id &&
-                        dm.targets[1]?.id === s1.id,
-                    )
-                  ) {
-                    return d
-                  }
-                  return {
-                    ...d,
-                    dimensions: [
-                      ...dims,
-                      {
-                        id: nextId('dim'),
-                        type: 'angle',
-                        value: ang,
-                        targets: [
-                          { kind: 'segment', id: s0.id },
-                          { kind: 'segment', id: s1.id },
-                        ],
-                      },
-                    ],
-                  }
-                })
-                return
-              }
-            }
-          }
-        }
+        if (dstate?.phase === 'place') {
+          const pl = dstate
+          dimPlacementRef.current = null
+          setPreview(null)
 
-        if (sref.length === 1 && sref[0].kind === 'circle') {
-          const circ = ws.circles.find((c) => c.id === sref[0].id)
-          if (circ) {
-            const rc = circleWithResolvedCenter(circ, pmapW)
-            if (rc.r > 1e-9) {
-              commit((d) => {
-                const dims = d.dimensions ?? []
-                if (
-                  dims.some(
-                    (dm) =>
-                      dm.type === 'radius' && dm.targets?.[0] === circ.id,
-                  )
-                ) {
-                  return d
-                }
-                return {
-                  ...d,
-                  dimensions: [
-                    ...dims,
-                    {
-                      id: nextId('dim'),
-                      type: 'radius',
-                      value: rc.r,
-                      targets: [circ.id],
-                    },
-                  ],
-                }
-              })
-              return
-            }
-          }
-        }
-
-        if (sref.length === 1 && sref[0].kind === 'segment') {
-          const seg = ws.segments.find((s) => s.id === sref[0].id)
-          if (seg) {
-            const pa = pmapW.get(seg.a)
-            const pb = pmapW.get(seg.b)
-            if (pa && pb) {
-              const L = Math.hypot(pb.x - pa.x, pb.y - pa.y)
-              if (L > 1e-9) {
-                commit((d) => {
-                  const dims = d.dimensions ?? []
-                  if (
-                    dims.some(
-                      (dm) =>
-                        dm.type === 'distance' &&
-                        dm.targets?.[0] === seg.id,
-                    )
-                  ) {
-                    return d
-                  }
-                  return {
-                    ...d,
-                    dimensions: [
-                      ...dims,
-                      {
-                        id: nextId('dim'),
-                        type: 'distance',
-                        value: L,
-                        targets: [seg.id],
-                      },
-                    ],
-                  }
-                })
-                return
-              }
-            }
-          }
-        }
-
-        const segsW = workspaceRef.current.segments ?? []
-        const pmap = new Map(pts.map((q) => [q.id, q]))
-        const hi = findNearestSegmentHit(segsW, pmap, wx, wy, tol)
-        if (!hi) return
-        const seg = hi.seg
-        const pa = pmap.get(seg.a)
-        const pb = pmap.get(seg.b)
-        if (!pa || !pb) return
-        const L = Math.hypot(pb.x - pa.x, pb.y - pa.y)
-        if (L < 1e-9) return
-        commit((d) => {
-          const dims = d.dimensions ?? []
-          if (
-            dims.some(
-              (dim) =>
-                dim.type === 'distance' && dim.targets?.[0] === seg.id,
+          if (pl.dimType === 'distance' && pl.ax != null) {
+            const offsetWorld = linearDimensionOffsetFromCursor(
+              wx,
+              wy,
+              pl.ax,
+              pl.ay,
+              pl.bx,
+              pl.by,
             )
-          ) {
-            return d
-          }
-          return {
-            ...d,
-            dimensions: [
-              ...dims,
-              {
+            commit((d) => {
+              const dims = d.dimensions ?? []
+              const row = {
                 id: nextId('dim'),
                 type: 'distance',
-                value: L,
-                targets: [seg.id],
-              },
-            ],
+                value: pl.value,
+                targets: pl.targets,
+                distanceKind: pl.distanceKind ?? 'segment',
+                offsetWorld,
+              }
+              return { ...d, dimensions: [...dims, row] }
+            })
+            return
           }
-        })
+
+          if (pl.dimType === 'angle') {
+            commit((d) => {
+              const dims = d.dimensions ?? []
+              if (
+                dims.some(
+                  (dm) =>
+                    dm.type === 'angle' &&
+                    dm.targets?.length === 2 &&
+                    dm.targets[0]?.id === pl.targets[0].id &&
+                    dm.targets[1]?.id === pl.targets[1].id,
+                )
+              ) {
+                return d
+              }
+              return {
+                ...d,
+                dimensions: [
+                  ...dims,
+                  {
+                    id: nextId('dim'),
+                    type: 'angle',
+                    value: pl.value,
+                    targets: pl.targets,
+                  },
+                ],
+              }
+            })
+            return
+          }
+
+          if (pl.dimType === 'radius') {
+            commit((d) => {
+              const dims = d.dimensions ?? []
+              if (
+                dims.some(
+                  (dm) =>
+                    dm.type === 'radius' && dm.targets?.[0] === pl.targets[0],
+                )
+              ) {
+                return d
+              }
+              return {
+                ...d,
+                dimensions: [
+                  ...dims,
+                  {
+                    id: nextId('dim'),
+                    type: 'radius',
+                    value: pl.value,
+                    targets: pl.targets,
+                  },
+                ],
+              }
+            })
+            return
+          }
+
+          return
+        }
+
+        if (dstate?.phase === 'pick2') {
+          const e2 = pickDimensionEntity(wx, wy, ws, opt.zoom)
+          if (!e2) return
+          const p1 = dstate.pick1
+          if (
+            p1.kind === 'segment' &&
+            e2.kind === 'segment' &&
+            p1.id === e2.id
+          ) {
+            const seg = ws.segments.find((s) => s.id === p1.id)
+            if (!seg) {
+              dimPlacementRef.current = null
+              return
+            }
+            const pmapW = new Map((ws.points ?? []).map((q) => [q.id, q]))
+            const pa = pmapW.get(seg.a)
+            const pb = pmapW.get(seg.b)
+            if (!pa || !pb) {
+              dimPlacementRef.current = null
+              return
+            }
+            const L = Math.hypot(pb.x - pa.x, pb.y - pa.y)
+            if (L < 1e-9) {
+              dimPlacementRef.current = null
+              return
+            }
+            dimPlacementRef.current = {
+              phase: 'place',
+              dimType: 'distance',
+              distanceKind: 'segment',
+              targets: [seg.id],
+              value: L,
+              ax: pa.x,
+              ay: pa.y,
+              bx: pb.x,
+              by: pb.y,
+            }
+            return
+          }
+          const resolved = resolveDimensionFromTwoPicks(p1, e2, ws)
+          if (!resolved) {
+            dimPlacementRef.current = null
+            setPreview(null)
+            return
+          }
+          dimPlacementRef.current = { phase: 'place', ...resolved }
+          return
+        }
+
+        const e1 = pickDimensionEntity(wx, wy, ws, opt.zoom)
+        if (!e1) return
+
+        if (e1.kind === 'circle') {
+          const rad = radiusDimensionDraftFromCircle(e1, ws)
+          if (!rad) return
+          dimPlacementRef.current = { phase: 'place', ...rad }
+          return
+        }
+
+        dimPlacementRef.current = { phase: 'pick2', pick1: e1 }
         return
       }
 
@@ -2528,6 +2593,58 @@ export function WorkspaceCanvas({
         )
       }
 
+      if (!d && toolRef.current === TOOL.DIMENSION) {
+        const pl = dimPlacementRef.current
+        if (pl?.phase === 'place') {
+          const wx = (lx - p.x) / opt.zoom
+          const wy = (ly - p.y) / opt.zoom
+          const unit = labelDrawOptionsRef.current?.worldUnit ?? 'u'
+          const showDeg = labelDrawOptionsRef.current?.showAngleDegrees !== false
+          const z = opt.zoom
+          if (pl.dimType === 'distance' && pl.ax != null) {
+            const off = linearDimensionOffsetFromCursor(
+              wx,
+              wy,
+              pl.ax,
+              pl.ay,
+              pl.bx,
+              pl.by,
+            )
+            setPreview({
+              kind: 'linearDimension',
+              ax: pl.ax,
+              ay: pl.ay,
+              bx: pl.bx,
+              by: pl.by,
+              offsetWorld: off,
+              label: `${Number(pl.value).toFixed(2)} ${unit}`,
+            })
+          } else if (pl.dimType === 'angle' && pl.a0 != null) {
+            const r = Math.max(12 / z, Math.hypot(wx - pl.vx, wy - pl.vy))
+            const label = showDeg
+              ? `${((pl.value * 180) / Math.PI).toFixed(1)}°`
+              : `${Number(pl.value).toFixed(3)} rad`
+            setPreview({
+              kind: 'angularDimension',
+              vx: pl.vx,
+              vy: pl.vy,
+              r,
+              a0: pl.a0,
+              a1: pl.a1,
+              label,
+            })
+          } else if (pl.dimType === 'radius') {
+            setPreview({
+              kind: 'radialDimension',
+              cx: pl.cx,
+              cy: pl.cy,
+              r: pl.r,
+              label: `R ${Number(pl.value).toFixed(2)} ${unit}`,
+            })
+          }
+        }
+      }
+
       if (draft?.kind === 'segment') {
         const near = findNearbyPoint(pts, lx, ly, p, opt.zoom, SNAP_PX)
         let bx
@@ -2998,6 +3115,7 @@ export function WorkspaceCanvas({
         className={`relative z-0 block touch-none select-none ${cursorClass}`}
         onContextMenu={(ev) => ev.preventDefault()}
         onPointerDown={onPointerDown}
+        onDoubleClick={onCanvasDoubleClick}
         onPointerMove={onPointerMove}
         onPointerLeave={() => {
           setHoverHighlight(null)

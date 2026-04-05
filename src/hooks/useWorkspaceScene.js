@@ -40,17 +40,56 @@ export const TOOL = {
 
 /** @type {{ id: string; label: string }[]} */
 export const RELATION_TYPE_OPTIONS = [
-  { id: 'fixOrigin', label: 'Fixed to world origin (0,0)' },
-  { id: 'equal', label: 'Equal length' },
-  { id: 'parallel', label: 'Parallel' },
-  { id: 'perpendicular', label: 'Perpendicular' },
-  { id: 'tangent', label: 'Tangent (segments or segment–circle)' },
-  { id: 'concentric', label: 'Concentric (circles)' },
-  { id: 'coincident', label: 'Coincident (points)' },
-  { id: 'horizontal', label: 'Horizontal' },
-  { id: 'vertical', label: 'Vertical' },
-  { id: 'symmetric', label: 'Symmetric' },
-  { id: 'similar', label: 'Similar (segment length ratio + angle)' },
+  {
+    id: 'fixOrigin',
+    label: 'Fix origin',
+    description: 'Locks a sketch point to the global origin (0,0).',
+  },
+  {
+    id: 'equal',
+    label: 'Equal',
+    description:
+      'Equal length (two segments) or equal radius (two circles).',
+  },
+  { id: 'parallel', label: 'Parallel', description: 'Two lines same direction.' },
+  {
+    id: 'perpendicular',
+    label: 'Perpendicular',
+    description: 'Two lines at 90°.',
+  },
+  {
+    id: 'tangent',
+    label: 'Tangent',
+    description:
+      'Line tangent to a circle, circle tangent to circle, or colinear segments at a shared vertex.',
+  },
+  {
+    id: 'concentric',
+    label: 'Concentric',
+    description: 'Two circles/arcs share the same center.',
+  },
+  {
+    id: 'coincident',
+    label: 'Coincident',
+    description: 'Point on point, or point lying on a line/segment.',
+  },
+  {
+    id: 'collinear',
+    label: 'Collinear',
+    description: 'Two lines lie on the same infinite straight line.',
+  },
+  { id: 'horizontal', label: 'Horizontal', description: 'Segment parallel to X.' },
+  { id: 'vertical', label: 'Vertical', description: 'Segment parallel to Y.' },
+  {
+    id: 'symmetric',
+    label: 'Symmetric',
+    description: 'Mirror one segment about the line of another.',
+  },
+  {
+    id: 'similar',
+    label: 'Similar',
+    description: 'Same direction with a fixed length ratio.',
+  },
 ]
 
 export const ARC_MODE = {
