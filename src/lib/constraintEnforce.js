@@ -197,6 +197,32 @@ export function applyConstraintEnforcement(data, constraint) {
     )
   }
 
+  if (t === 'horizontal' && targets.length >= 2 && targets[0].kind === 'point') {
+    let d = data
+    const y0 = d.points.find((p) => p.id === targets[0].id)?.y
+    if (y0 == null || !Number.isFinite(y0)) return recomputeBoundArcs(d)
+    for (let i = 1; i < targets.length; i++) {
+      const pid = targets[i].id
+      const p = d.points.find((q) => q.id === pid)
+      if (!p) continue
+      d = movePoint(d, pid, p.x, y0)
+    }
+    return recomputeBoundArcs(d)
+  }
+
+  if (t === 'vertical' && targets.length >= 2 && targets[0].kind === 'point') {
+    let d = data
+    const x0 = d.points.find((p) => p.id === targets[0].id)?.x
+    if (x0 == null || !Number.isFinite(x0)) return recomputeBoundArcs(d)
+    for (let i = 1; i < targets.length; i++) {
+      const pid = targets[i].id
+      const p = d.points.find((q) => q.id === pid)
+      if (!p) continue
+      d = movePoint(d, pid, x0, p.y)
+    }
+    return recomputeBoundArcs(d)
+  }
+
   if (t === 'horizontal' && targets.length === 1 && targets[0].kind === 'segment') {
     const ep = segEndpoints(data, targets[0].id)
     if (!ep) return recomputeBoundArcs(data)

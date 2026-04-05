@@ -290,6 +290,40 @@ export function buildPlaneGcsPrimitives(data) {
       continue
     }
 
+    if (
+      c.type === 'horizontal' &&
+      t.length >= 2 &&
+      t.every((x) => x.kind === 'point')
+    ) {
+      const p0 = t[0].id
+      for (let i = 1; i < t.length; i++) {
+        out.push({
+          id: nextCid('hpp'),
+          type: 'horizontal_pp',
+          p1_id: p0,
+          p2_id: t[i].id,
+        })
+      }
+      continue
+    }
+
+    if (
+      c.type === 'vertical' &&
+      t.length >= 2 &&
+      t.every((x) => x.kind === 'point')
+    ) {
+      const p0 = t[0].id
+      for (let i = 1; i < t.length; i++) {
+        out.push({
+          id: nextCid('vpp'),
+          type: 'vertical_pp',
+          p1_id: p0,
+          p2_id: t[i].id,
+        })
+      }
+      continue
+    }
+
     if (c.type === 'horizontal' && t.length === 1 && t[0].kind === 'segment') {
       out.push({
         id: nextCid('hor'),
@@ -460,6 +494,37 @@ export function buildPlaneGcsPrimitives(data) {
         const p1 = t[0]
         const p2 = t[1]
         if (typeof p1 !== 'string' || typeof p2 !== 'string') continue
+        const proj = dim.linearProjection ?? 'aligned'
+        if (proj === 'horizontal') {
+          const pa = pmap.get(p1)
+          const pb = pmap.get(p2)
+          if (!pa || !pb) continue
+          const [pLo, pHi] = pa.x <= pb.x ? [p1, p2] : [p2, p1]
+          out.push({
+            id: nextCid('dDiffX'),
+            type: 'difference',
+            param1: { o_id: pHi, prop: 'x' },
+            param2: { o_id: pLo, prop: 'x' },
+            difference: pname,
+            driving: true,
+          })
+          continue
+        }
+        if (proj === 'vertical') {
+          const pa = pmap.get(p1)
+          const pb = pmap.get(p2)
+          if (!pa || !pb) continue
+          const [pLo, pHi] = pa.y <= pb.y ? [p1, p2] : [p2, p1]
+          out.push({
+            id: nextCid('dDiffY'),
+            type: 'difference',
+            param1: { o_id: pHi, prop: 'y' },
+            param2: { o_id: pLo, prop: 'y' },
+            difference: pname,
+            driving: true,
+          })
+          continue
+        }
         out.push({
           id: nextCid('dpp'),
           type: 'p2p_distance',
@@ -517,6 +582,34 @@ export function buildPlaneGcsPrimitives(data) {
       if (dk === 'segment' && typeof t[0] === 'string') {
         const seg = segments.find((s) => s.id === t[0])
         if (!seg) continue
+        const pa = pmap.get(seg.a)
+        const pb = pmap.get(seg.b)
+        if (!pa || !pb) continue
+        const proj = dim.linearProjection ?? 'aligned'
+        if (proj === 'horizontal') {
+          const [pLo, pHi] = pa.x <= pb.x ? [seg.a, seg.b] : [seg.b, seg.a]
+          out.push({
+            id: nextCid('dDiffXs'),
+            type: 'difference',
+            param1: { o_id: pHi, prop: 'x' },
+            param2: { o_id: pLo, prop: 'x' },
+            difference: pname,
+            driving: true,
+          })
+          continue
+        }
+        if (proj === 'vertical') {
+          const [pLo, pHi] = pa.y <= pb.y ? [seg.a, seg.b] : [seg.b, seg.a]
+          out.push({
+            id: nextCid('dDiffYs'),
+            type: 'difference',
+            param1: { o_id: pHi, prop: 'y' },
+            param2: { o_id: pLo, prop: 'y' },
+            difference: pname,
+            driving: true,
+          })
+          continue
+        }
         out.push({
           id: nextCid('dlen'),
           type: 'p2p_distance',
@@ -529,16 +622,31 @@ export function buildPlaneGcsPrimitives(data) {
       }
     }
     if (dim.type === 'radius' && dim.targets?.[0]) {
-      const cid = circlePrimitiveId(dim.targets[0])
+      if (dim.splineCurvature) continue
+      const tid = dim.targets[0]
+      const arc = arcs.find((a) => a.id === tid)
+      const circ = circles.find((c) => c.id === tid)
       const v = dim.value
       if (v == null || !Number.isFinite(v) || v <= 0) continue
-      out.push({
-        id: nextCid('drad'),
-        type: 'circle_radius',
-        c_id: cid,
-        radius: pname,
-        driving: true,
-      })
+      if (arc) {
+        out.push({
+          id: nextCid('darad'),
+          type: 'arc_radius',
+          a_id: arcPrimitiveId(arc.id),
+          radius: pname,
+          driving: true,
+        })
+        continue
+      }
+      if (circ) {
+        out.push({
+          id: nextCid('drad'),
+          type: 'circle_radius',
+          c_id: circlePrimitiveId(circ.id),
+          radius: pname,
+          driving: true,
+        })
+      }
       continue
     }
     if (dim.type === 'diameter' && dim.targets?.[0]) {

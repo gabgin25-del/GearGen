@@ -5,6 +5,8 @@ import {
   relaxAllConstraints,
 } from './sketchConstraintQuality.js'
 import { solveGCS } from './gcsSolver.js'
+import { measuredLinearDistanceForDim } from './dimensionGeometry.js'
+import { circleWithResolvedCenter } from './circleResolve.js'
 
 /**
  * Layer 1 — Relaxation probe: nudge a point, relax + GCS heal; if a satisfying
@@ -35,17 +37,37 @@ export function dimensionsSatisfied(
   angTol = DIM_ANG_TOL,
 ) {
   const pmap = new Map(data.points.map((p) => [p.id, p]))
+  const circles = data.circles ?? []
+  const arcs = data.arcs ?? []
   for (const dim of data.dimensions ?? []) {
-    if (dim.type === 'distance' && dim.targets?.[0]) {
-      const seg = (data.segments ?? []).find((s) => s.id === dim.targets[0])
-      if (!seg) return false
-      const pa = pmap.get(seg.a)
-      const pb = pmap.get(seg.b)
-      if (!pa || !pb) return false
-      const L = Math.hypot(pb.x - pa.x, pb.y - pa.y)
+    if (dim.type === 'distance') {
       const v = dim.value
       if (v == null || !Number.isFinite(v) || v <= 0) continue
-      if (Math.abs(L - v) > lenTol) return false
+      const m = measuredLinearDistanceForDim(dim, data)
+      if (m == null) return false
+      if (Math.abs(m - v) > lenTol) return false
+      continue
+    }
+    if (dim.type === 'radius' && dim.targets?.[0]) {
+      if (dim.splineCurvature) continue
+      const tid = dim.targets[0]
+      const shape =
+        circles.find((c) => c.id === tid) ?? arcs.find((a) => a.id === tid)
+      if (!shape) continue
+      const rc = circleWithResolvedCenter(shape, pmap)
+      const v = dim.value
+      if (v == null || !Number.isFinite(v) || v <= 0) continue
+      if (Math.abs(rc.r - v) > lenTol) return false
+      continue
+    }
+    if (dim.type === 'diameter' && dim.targets?.[0]) {
+      const circ = circles.find((c) => c.id === dim.targets[0])
+      if (!circ) continue
+      const rc = circleWithResolvedCenter(circ, pmap)
+      const v = dim.value
+      if (v == null || !Number.isFinite(v) || v <= 0) continue
+      if (Math.abs(2 * rc.r - v) > lenTol) return false
+      continue
     }
     if (dim.type === 'angle' && dim.targets?.length >= 3) {
       const [idC, idA, idB] = dim.targets

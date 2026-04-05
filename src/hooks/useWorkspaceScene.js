@@ -86,8 +86,18 @@ export const RELATION_TYPE_OPTIONS = [
     label: 'Collinear',
     description: 'Two lines lie on the same infinite straight line.',
   },
-  { id: 'horizontal', label: 'Horizontal', description: 'Segment parallel to X.' },
-  { id: 'vertical', label: 'Vertical', description: 'Segment parallel to Y.' },
+  {
+    id: 'horizontal',
+    label: 'Horizontal',
+    description:
+      'Segment parallel to X, or two or more points sharing the same Y (aligned horizontally).',
+  },
+  {
+    id: 'vertical',
+    label: 'Vertical',
+    description:
+      'Segment parallel to Y, or two or more points sharing the same X (aligned vertically).',
+  },
   {
     id: 'symmetric',
     label: 'Symmetric',

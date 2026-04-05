@@ -124,6 +124,84 @@ export function linearDimensionOffsetFromCursor(wx, wy, ax, ay, bx, by) {
 }
 
 /**
+ * SolidWorks-style: aligned when cursor stays near the chord; large horizontal mouse
+ * motion → vertical (ΔY) dimension; large vertical motion → horizontal (ΔX) dimension.
+ * @param {'aligned' | 'horizontal' | 'vertical'} [fallback]
+ */
+export function classifyLinearDimensionProjection(
+  wx,
+  wy,
+  ax,
+  ay,
+  bx,
+  by,
+  fallback = 'aligned',
+) {
+  const dx = bx - ax
+  const dy = by - ay
+  const L = Math.hypot(dx, dy)
+  if (L < 1e-9) return fallback
+  const mx = (ax + bx) / 2
+  const my = (ay + by) / 2
+  const vx = wx - mx
+  const vy = wy - my
+  const ux = dx / L
+  const uy = dy / L
+  const nx = -uy
+  const ny = ux
+  const perp = vx * nx + vy * ny
+  const threshold = Math.max(10, L * 0.12)
+  if (Math.abs(perp) < threshold) return 'aligned'
+  if (Math.abs(vx) > Math.abs(vy)) return 'vertical'
+  return 'horizontal'
+}
+
+/**
+ * Signed offset for dimension line: aligned = along chord normal; horizontal = Δy from mid;
+ * vertical = Δx from mid.
+ */
+export function linearDimensionOffsetForProjection(
+  wx,
+  wy,
+  ax,
+  ay,
+  bx,
+  by,
+  projection,
+) {
+  const mx = (ax + bx) / 2
+  const my = (ay + by) / 2
+  if (projection === 'horizontal') return wy - my
+  if (projection === 'vertical') return wx - mx
+  return linearDimensionOffsetFromCursor(wx, wy, ax, ay, bx, by)
+}
+
+export function linearDistanceValueForProjection(ax, ay, bx, by, projection) {
+  if (projection === 'horizontal') return Math.abs(bx - ax)
+  if (projection === 'vertical') return Math.abs(by - ay)
+  return Math.hypot(bx - ax, by - ay)
+}
+
+/**
+ * @param {object} dim
+ * @param {object} data
+ * @returns {number | null}
+ */
+export function measuredLinearDistanceForDim(dim, data) {
+  if (dim.type !== 'distance') return null
+  const anchors = linearDistanceAnchorPoints(dim, data)
+  if (!anchors) return null
+  const proj = dim.linearProjection ?? 'aligned'
+  return linearDistanceValueForProjection(
+    anchors.ax,
+    anchors.ay,
+    anchors.bx,
+    anchors.by,
+    proj,
+  )
+}
+
+/**
  * @param {object} dim
  * @returns {'segment' | 'pointPoint' | 'pointLine' | 'parallelLines'}
  */

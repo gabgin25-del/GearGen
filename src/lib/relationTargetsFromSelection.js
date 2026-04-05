@@ -110,6 +110,7 @@ export function relationTargetsFromSelection(type, selection, data) {
     }
     case 'horizontal':
     case 'vertical': {
+      if (pts.length >= 2) return pts.map((p) => ({ kind: 'point', id: p.id }))
       if (segs.length >= 1)
         return [{ kind: 'segment', id: segs[0].id }]
       if (polys.length >= 1) {

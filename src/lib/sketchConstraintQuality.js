@@ -191,6 +191,28 @@ export function constraintSatisfied(data, c) {
     return d <= PT_TOL * 10
   }
 
+  if (t === 'horizontal' && targets.length >= 2 && targets[0].kind === 'point') {
+    const m = ptMap(data)
+    const y0 = m.get(targets[0].id)?.y
+    if (y0 == null || !Number.isFinite(y0)) return false
+    for (let i = 1; i < targets.length; i++) {
+      const p = m.get(targets[i].id)
+      if (!p || Math.abs(p.y - y0) > PT_TOL) return false
+    }
+    return true
+  }
+
+  if (t === 'vertical' && targets.length >= 2 && targets[0].kind === 'point') {
+    const m = ptMap(data)
+    const x0 = m.get(targets[0].id)?.x
+    if (x0 == null || !Number.isFinite(x0)) return false
+    for (let i = 1; i < targets.length; i++) {
+      const p = m.get(targets[i].id)
+      if (!p || Math.abs(p.x - x0) > PT_TOL) return false
+    }
+    return true
+  }
+
   if (t === 'horizontal' && targets.length === 1) {
     const ep = segEndpoints(data, targets[0].id)
     if (!ep) return false
@@ -389,6 +411,13 @@ function sameConstraintTargets(a, b) {
   const tb = b.targets ?? []
   if (ta.length !== tb.length) return false
   const norm = (t) => {
+    if (
+      (a.type === 'horizontal' || a.type === 'vertical') &&
+      t.length >= 2 &&
+      t.every((x) => x.kind === 'point')
+    ) {
+      return [...t].sort((u, v) => u.id.localeCompare(v.id))
+    }
     if (
       a.type === 'coincident' &&
       t.length === 2 &&

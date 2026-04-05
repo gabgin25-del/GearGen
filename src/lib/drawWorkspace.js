@@ -405,9 +405,14 @@ function drawPolarGrid(
   const z = zoom || 1
   ctx.save()
   ctx.globalAlpha = radialAlpha
-  ctx.lineWidth = Math.max(0.25, 0.5 / z)
   ctx.strokeStyle = pal.polar1
-  for (let r = rStep; r <= maxR; r += rStep) {
+  let ringIndex = 0
+  for (let r = rStep; r <= maxR; r += rStep, ringIndex++) {
+    const major = ringIndex % 6 === 0
+    ctx.lineWidth = major
+      ? Math.max(1.15, 1.85 / z)
+      : Math.max(0.35, 0.72 / z)
+    ctx.globalAlpha = major ? Math.min(1, radialAlpha + 0.08) : radialAlpha
     ctx.beginPath()
     ctx.arc(ox, oy, r, 0, Math.PI * 2)
     ctx.stroke()
@@ -445,19 +450,20 @@ function drawPolarSpokeLabels(
   if (maxR < 3 / z) return
   const pad = 14 / z
   const labelR = Math.max(maxR * 0.88, maxR - pad)
-  /** Fixed 30° spokes: π/6 … 11π/6 (independent of user polar grid step). */
+  /** Degree labels every 30° on outer ring (0° … 330°). */
   const labelStep = Math.PI / 6
   const fontPx = Math.max(10, Math.min(13, 11 * Math.sqrt(z)))
-  for (let k = 1; k < 12; k++) {
+  for (let k = 0; k < 12; k++) {
     const a = k * labelStep
     const lx = ox + Math.cos(a) * labelR
     const ly = oy + Math.sin(a) * labelR
-    const text = formatAxisTickValue(a, labelStep, 'radians_pi')
+    const deg = (k * 30) % 360
+    const text = `${deg}°`
     ctx.save()
     ctx.translate(lx, ly)
     ctx.rotate(a + Math.PI / 2)
     ctx.scale(1 / z, 1 / z)
-    ctx.font = `italic ${fontPx}px "Times New Roman", Times, serif`
+    ctx.font = `${fontPx}px Inter, system-ui, sans-serif`
     ctx.fillStyle = pal.tickText
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -931,7 +937,7 @@ export function drawWorkspaceScene(ctx, p) {
       })
     }
     for (const c of resolvedCircles) {
-      const txt = `R ${formatLengthMmForDisplay(c.r, du, 1)} ${unit}`
+      const txt = `Ø ${formatLengthMmForDisplay(2 * c.r, du, 1)} ${unit}`
       drawWorldText(ctx, c.cx, c.cy, z, txt, {
         font: '10px Inter, system-ui, sans-serif',
         color: pal.tickText,
@@ -971,15 +977,36 @@ export function drawWorkspaceScene(ctx, p) {
           label,
           theme,
           offsetWorld: dim.offsetWorld ?? DRIVING_DIM_OFFSET_WORLD,
+          projection: dim.linearProjection ?? 'aligned',
         })
       } else if (dim.type === 'radius' && dim.targets?.[0]) {
-        const c = circles.find((x) => x.id === dim.targets[0])
-        if (!c) continue
-        const rc = circleWithResolvedCenter(c, pointById)
+        const tid = dim.targets[0]
+        const arc = (arcs ?? []).find((a) => a.id === tid)
+        const c = circles.find((x) => x.id === tid)
+        let rc = null
+        if (dim.splineCurvature) {
+          if (
+            dim.dimCx != null &&
+            dim.dimCy != null &&
+            dim.dimR != null &&
+            dim.dimR > 1e-9
+          ) {
+            rc = { cx: dim.dimCx, cy: dim.dimCy, r: dim.dimR }
+          }
+        } else if (arc || c) {
+          rc = circleWithResolvedCenter(arc ?? c, pointById)
+        }
+        if (!rc || rc.r < 1e-9) continue
+        const isArc = !!arc
+        const isCirc = !!c && !arc
         const label =
           v != null && Number.isFinite(v)
-            ? `R ${formatLengthMmForDisplay(v, du)} ${unit}`
-            : `R — ${unit}`
+            ? isCirc
+              ? `Ø ${formatLengthMmForDisplay(2 * v, du)} ${unit}`
+              : `R ${formatLengthMmForDisplay(v, du)} ${unit}`
+            : isCirc
+              ? `Ø — ${unit}`
+              : `R — ${unit}`
         drawRadialDimension(ctx, {
           cx: rc.cx,
           cy: rc.cy,
@@ -987,6 +1014,7 @@ export function drawWorkspaceScene(ctx, p) {
           zoom: z,
           label,
           theme,
+          leaderAngle: dim.leaderAngle ?? 0,
         })
       } else if (dim.type === 'diameter' && dim.targets?.[0]) {
         const c = circles.find((x) => x.id === dim.targets[0])
@@ -1003,6 +1031,7 @@ export function drawWorkspaceScene(ctx, p) {
           zoom: z,
           label,
           theme,
+          leaderAngle: dim.leaderAngle ?? 0,
         })
       } else if (dim.type === 'angle' && dim.targets?.length === 3) {
         const [idC, idA, idB] = dim.targets
@@ -1419,6 +1448,7 @@ export function drawWorkspaceScene(ctx, p) {
           preview.offsetWorld != null
             ? preview.offsetWorld
             : DRIVING_DIM_OFFSET_WORLD,
+        projection: preview.projection ?? 'aligned',
       })
       ctx.restore()
     } else if (preview.kind === 'angularDimension') {
@@ -1447,6 +1477,7 @@ export function drawWorkspaceScene(ctx, p) {
         zoom: z,
         label: preview.label ?? '',
         theme,
+        leaderAngle: preview.leaderAngle ?? 0,
       })
       ctx.restore()
     }

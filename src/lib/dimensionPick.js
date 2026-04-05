@@ -1,11 +1,36 @@
-import { hitCircle } from './hitTest.js'
-import { findNearestSegmentHit } from './hitTest.js'
+import {
+  hitArc,
+  hitCircle,
+  hitPolylineSamples,
+  findNearestSegmentHit,
+} from './hitTest.js'
 import {
   parallelLinesMeasure,
   pointPointMeasure,
   pointToLineMeasure,
 } from './dimensionGeometry.js'
 import { circleWithResolvedCenter } from './circleResolve.js'
+import { sampleSplinePolyline } from './splineMath.js'
+
+/**
+ * @param {number} ax
+ * @param {number} ay
+ * @param {number} bx
+ * @param {number} by
+ * @param {number} cx
+ * @param {number} cy
+ */
+function circumcenter(ax, ay, bx, by, cx, cy) {
+  const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+  if (Math.abs(d) < 1e-14) return null
+  const a2 = ax * ax + ay * ay
+  const b2 = bx * bx + by * by
+  const c2 = cx * cx + cy * cy
+  return {
+    x: (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d,
+    y: (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d,
+  }
+}
 
 /**
  * @param {number} wx
@@ -31,6 +56,23 @@ export function pickDimensionEntity(wx, wy, data, zoom) {
   const pmap = new Map(pts.map((q) => [q.id, q]))
   const hi = findNearestSegmentHit(data.segments ?? [], pmap, wx, wy, tol)
   if (hi) return { kind: 'segment', id: hi.seg.id }
+
+  for (const a of data.arcs ?? []) {
+    if (hitArc(wx, wy, a, tol)) return { kind: 'arc', id: a.id }
+  }
+
+  for (const sp of data.splines ?? []) {
+    const verts = sp.vertexIds.map((id) => pmap.get(id)).filter(Boolean)
+    if (verts.length < 2) continue
+    const samples = sampleSplinePolyline(verts, sp.splineType, {
+      tension: sp.tension ?? 0.5,
+      closed: !!sp.closed,
+      segmentsPerSpan: sp.segmentsPerSpan ?? 14,
+    })
+    if (samples.length >= 2 && hitPolylineSamples(wx, wy, samples, tol)) {
+      return { kind: 'spline', id: sp.id }
+    }
+  }
 
   for (const c of data.circles ?? []) {
     if (hitCircle(wx, wy, c, pmap, tol)) {
@@ -169,20 +211,102 @@ export function resolveDimensionFromTwoPicks(p1, p2, data) {
 /**
  * @param {{ kind: string; id: string }} pick
  * @param {object} data
+ * @param {number} wx
+ * @param {number} wy
  */
-export function radiusDimensionDraftFromCircle(pick, data) {
+export function diameterDimensionDraftFromCircle(pick, data, wx, wy) {
   if (pick.kind !== 'circle') return null
   const circ = data.circles.find((c) => c.id === pick.id)
   if (!circ) return null
   const pmap = new Map((data.points ?? []).map((p) => [p.id, p]))
   const rc = circleWithResolvedCenter(circ, pmap)
   if (rc.r < 1e-9) return null
+  const leaderAngle = Math.atan2(wy - rc.cy, wx - rc.cx)
+  return {
+    dimType: 'diameter',
+    targets: [circ.id],
+    value: 2 * rc.r,
+    cx: rc.cx,
+    cy: rc.cy,
+    r: rc.r,
+    leaderAngle,
+  }
+}
+
+/**
+ * @param {{ kind: string; id: string }} pick
+ * @param {object} data
+ * @param {number} wx
+ * @param {number} wy
+ */
+export function radiusDimensionDraftFromArc(pick, data, wx, wy) {
+  if (pick.kind !== 'arc') return null
+  const arc = data.arcs?.find((a) => a.id === pick.id)
+  if (!arc) return null
+  const pmap = new Map((data.points ?? []).map((p) => [p.id, p]))
+  const rc = circleWithResolvedCenter(arc, pmap)
+  if (rc.r < 1e-9) return null
+  const leaderAngle = Math.atan2(wy - rc.cy, wx - rc.cx)
   return {
     dimType: 'radius',
-    targets: [circ.id],
+    targets: [arc.id],
     value: rc.r,
     cx: rc.cx,
     cy: rc.cy,
     r: rc.r,
+    leaderAngle,
+  }
+}
+
+/**
+ * Local osculating circle from three polyline samples (annotation; weak solver coupling).
+ * @param {{ kind: string; id: string }} pick
+ * @param {object} data
+ * @param {number} wx
+ * @param {number} wy
+ */
+export function splineCurvatureDimensionDraft(pick, data, wx, wy) {
+  if (pick.kind !== 'spline') return null
+  const sp = data.splines?.find((s) => s.id === pick.id)
+  if (!sp) return null
+  const pmap = new Map((data.points ?? []).map((p) => [p.id, p]))
+  const verts = sp.vertexIds.map((id) => pmap.get(id)).filter(Boolean)
+  if (verts.length < 3) return null
+  const samples = sampleSplinePolyline(verts, sp.splineType, {
+    tension: sp.tension ?? 0.5,
+    closed: !!sp.closed,
+    segmentsPerSpan: Math.max(24, sp.segmentsPerSpan ?? 14),
+  })
+  if (samples.length < 3) return null
+
+  let bestI = 1
+  let bestD = Infinity
+  for (let i = 1; i < samples.length - 1; i++) {
+    const q = samples[i]
+    const d = Math.hypot(q.x - wx, q.y - wy)
+    if (d < bestD) {
+      bestD = d
+      bestI = i
+    }
+  }
+  if (bestD > 25) return null
+
+  const p0 = samples[bestI - 1]
+  const p1 = samples[bestI]
+  const p2 = samples[bestI + 1]
+  const cc = circumcenter(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y)
+  if (!cc) return null
+  const R = Math.hypot(p1.x - cc.x, p1.y - cc.y)
+  if (R < 1e-3 || R > 1e6) return null
+  const leaderAngle = Math.atan2(wy - cc.y, wx - cc.x)
+  return {
+    dimType: 'radius',
+    splineCurvature: true,
+    targets: [sp.id],
+    value: R,
+    cx: cc.x,
+    cy: cc.y,
+    r: R,
+    leaderAngle,
   }
 }

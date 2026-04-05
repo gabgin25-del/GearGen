@@ -41,11 +41,15 @@ import {
 } from '../../lib/hitTest.js'
 import { circleWithResolvedCenter } from '../../lib/circleResolve.js'
 import {
-  linearDimensionOffsetFromCursor,
+  classifyLinearDimensionProjection,
+  linearDimensionOffsetForProjection,
+  linearDistanceValueForProjection,
 } from '../../lib/dimensionGeometry.js'
 import {
   pickDimensionEntity,
-  radiusDimensionDraftFromCircle,
+  diameterDimensionDraftFromCircle,
+  radiusDimensionDraftFromArc,
+  splineCurvatureDimensionDraft,
   resolveDimensionFromTwoPicks,
 } from '../../lib/dimensionPick.js'
 import { hitDrivingDimension } from '../../lib/dimensionHitTest.js'
@@ -67,6 +71,10 @@ import { canvasLocalFromClient } from '../../lib/workspaceCoords.js'
 import { collectSketchEntitiesInWorldRect } from '../../lib/marqueeSelection.js'
 import { ARC_MODE, TOOL } from '../../hooks/useWorkspaceScene.js'
 import { useElementSize } from '../../hooks/useElementSize.js'
+
+/** Ruler-style cursor for dimension tool (fallback: crosshair). */
+const DIMENSION_CURSOR =
+  'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2394a3b8\' stroke-width=\'1.5\' stroke-linecap=\'round\'%3E%3Cpath d=\'M5 19L19 5M7 15l2-2m2-2 2-2m2-2 2-2\'/%3E%3C/svg%3E") 2 20, crosshair'
 
 const SNAP_PX = 10
 /** Canvas pixels: below this, marquee counts as a click (clear / no-op), not a box. */
@@ -628,24 +636,35 @@ export function WorkspaceCanvas({
   const commitDimEdit = useCallback(() => {
     const cur = dimEditRef.current
     const applyFn = setDrivingDimRef.current
-    dimEditRef.current = null
-    setDimEdit(null)
-    if (!cur || !applyFn) return
-    let v = Number.parseFloat(String(cur.draft).trim())
-    if (!Number.isFinite(v)) return
+    if (!cur || !applyFn) {
+      dimEditRef.current = null
+      setDimEdit(null)
+      return
+    }
+    const raw = String(cur.draft).trim()
+    let v = Number.parseFloat(raw)
+    if (raw === '' || !Number.isFinite(v)) {
+      dimEditRef.current = null
+      setDimEdit(null)
+      return
+    }
     if (cur.editInDegrees) v = (v * Math.PI) / 180
     const t = cur.dimType
     if (
-      t === 'distance' ||
-      t === 'radius' ||
-      t === 'diameter'
+      (t === 'distance' || t === 'radius' || t === 'diameter') &&
+      v <= 0
     ) {
-      if (v <= 0) return
-    } else if (t === 'angle') {
-      if (v <= 0 || v > 2 * Math.PI + 1e-9) return
-    } else if (v <= 0) {
+      dimEditRef.current = null
+      setDimEdit(null)
       return
     }
+    if (t === 'angle' && (v <= 0 || v > 2 * Math.PI + 1e-9)) {
+      dimEditRef.current = null
+      setDimEdit(null)
+      return
+    }
+    dimEditRef.current = null
+    setDimEdit(null)
     applyFn(cur.id, v)
   }, [])
 
@@ -659,6 +678,15 @@ export function WorkspaceCanvas({
     setPreview(null)
     if (tool !== TOOL.DIMENSION) dimPlacementRef.current = null
   }, [tool, patchDraft, setPreview])
+
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    el.style.cursor = tool === TOOL.DIMENSION ? DIMENSION_CURSOR : ''
+    return () => {
+      el.style.cursor = ''
+    }
+  }, [tool])
 
   useEffect(() => {
     workspaceRef.current = {
@@ -1424,30 +1452,71 @@ export function WorkspaceCanvas({
           setPreview(null)
 
           if (pl.dimType === 'distance' && pl.ax != null) {
-            const offsetWorld = linearDimensionOffsetFromCursor(
+            const dk = pl.distanceKind
+            const smart = dk === 'pointPoint' || dk === 'segment'
+            const proj = smart
+              ? classifyLinearDimensionProjection(
+                  wx,
+                  wy,
+                  pl.ax,
+                  pl.ay,
+                  pl.bx,
+                  pl.by,
+                )
+              : 'aligned'
+            const offsetWorld = linearDimensionOffsetForProjection(
               wx,
               wy,
               pl.ax,
               pl.ay,
               pl.bx,
               pl.by,
+              proj,
             )
+            const value = linearDistanceValueForProjection(
+              pl.ax,
+              pl.ay,
+              pl.bx,
+              pl.by,
+              proj,
+            )
+            const dimId = nextId('dim')
+            const rectPl = containerRef.current?.getBoundingClientRect()
+            const ldoPl = labelDrawOptionsRef.current
+            const duPl = ldoPl?.documentUnits ?? DEFAULT_DOCUMENT_UNITS
             commit((d) => {
               const dims = d.dimensions ?? []
               const row = {
-                id: nextId('dim'),
+                id: dimId,
                 type: 'distance',
-                value: pl.value,
+                value,
                 targets: pl.targets,
                 distanceKind: pl.distanceKind ?? 'segment',
                 offsetWorld,
+                linearProjection: proj,
               }
               return { ...d, dimensions: [...dims, row] }
             })
+            if (rectPl && setDrivingDimRef.current) {
+              setDimEdit({
+                id: dimId,
+                dimType: 'distance',
+                editInDegrees: false,
+                left: e.clientX - rectPl.left + 12,
+                top: e.clientY - rectPl.top - 30,
+                draft:
+                  value != null && Number.isFinite(value)
+                    ? String(worldMmToDisplay(value, duPl))
+                    : '',
+              })
+            }
             return
           }
 
           if (pl.dimType === 'angle') {
+            const dimIdAng = nextId('dim')
+            const rectAng = containerRef.current?.getBoundingClientRect()
+            const showDegPl = labelDrawOptionsRef.current?.showAngleDegrees !== false
             commit((d) => {
               const dims = d.dimensions ?? []
               if (
@@ -1466,7 +1535,7 @@ export function WorkspaceCanvas({
                 dimensions: [
                   ...dims,
                   {
-                    id: nextId('dim'),
+                    id: dimIdAng,
                     type: 'angle',
                     value: pl.value,
                     targets: pl.targets,
@@ -1474,10 +1543,30 @@ export function WorkspaceCanvas({
                 ],
               }
             })
+            if (rectAng && setDrivingDimRef.current) {
+              const v0 = pl.value
+              setDimEdit({
+                id: dimIdAng,
+                dimType: 'angle',
+                editInDegrees: showDegPl,
+                left: e.clientX - rectAng.left + 12,
+                top: e.clientY - rectAng.top - 30,
+                draft:
+                  v0 != null && Number.isFinite(v0)
+                    ? showDegPl
+                      ? String((v0 * 180) / Math.PI)
+                      : String(v0)
+                    : '',
+              })
+            }
             return
           }
 
           if (pl.dimType === 'radius') {
+            const dimIdR = nextId('dim')
+            const rectR = containerRef.current?.getBoundingClientRect()
+            const ldoR = labelDrawOptionsRef.current
+            const duR = ldoR?.documentUnits ?? DEFAULT_DOCUMENT_UNITS
             commit((d) => {
               const dims = d.dimensions ?? []
               if (
@@ -1488,19 +1577,84 @@ export function WorkspaceCanvas({
               ) {
                 return d
               }
+              const row = {
+                id: dimIdR,
+                type: 'radius',
+                value: pl.value,
+                targets: pl.targets,
+                leaderAngle: pl.leaderAngle ?? 0,
+                splineCurvature: !!pl.splineCurvature,
+                ...(pl.splineCurvature
+                  ? {
+                      dimCx: pl.cx,
+                      dimCy: pl.cy,
+                      dimR: pl.value,
+                    }
+                  : {}),
+              }
+              return { ...d, dimensions: [...dims, row] }
+            })
+            if (rectR && setDrivingDimRef.current) {
+              const vr = pl.value
+              setDimEdit({
+                id: dimIdR,
+                dimType: 'radius',
+                editInDegrees: false,
+                left: e.clientX - rectR.left + 12,
+                top: e.clientY - rectR.top - 30,
+                draft:
+                  vr != null && Number.isFinite(vr)
+                    ? String(worldMmToDisplay(vr, duR))
+                    : '',
+              })
+            }
+            return
+          }
+
+          if (pl.dimType === 'diameter') {
+            const dimIdD = nextId('dim')
+            const rectD = containerRef.current?.getBoundingClientRect()
+            const ldoD = labelDrawOptionsRef.current
+            const duD = ldoD?.documentUnits ?? DEFAULT_DOCUMENT_UNITS
+            commit((d) => {
+              const dims = d.dimensions ?? []
+              if (
+                dims.some(
+                  (dm) =>
+                    dm.type === 'diameter' &&
+                    dm.targets?.[0] === pl.targets[0],
+                )
+              ) {
+                return d
+              }
               return {
                 ...d,
                 dimensions: [
                   ...dims,
                   {
-                    id: nextId('dim'),
-                    type: 'radius',
+                    id: dimIdD,
+                    type: 'diameter',
                     value: pl.value,
                     targets: pl.targets,
+                    leaderAngle: pl.leaderAngle ?? 0,
                   },
                 ],
               }
             })
+            if (rectD && setDrivingDimRef.current) {
+              const vd = pl.value
+              setDimEdit({
+                id: dimIdD,
+                dimType: 'diameter',
+                editInDegrees: false,
+                left: e.clientX - rectD.left + 12,
+                top: e.clientY - rectD.top - 30,
+                draft:
+                  vd != null && Number.isFinite(vd)
+                    ? String(worldMmToDisplay(vd, duD))
+                    : '',
+              })
+            }
             return
           }
 
@@ -1560,7 +1714,19 @@ export function WorkspaceCanvas({
         if (!e1) return
 
         if (e1.kind === 'circle') {
-          const rad = radiusDimensionDraftFromCircle(e1, ws)
+          const rad = diameterDimensionDraftFromCircle(e1, ws, wx, wy)
+          if (!rad) return
+          dimPlacementRef.current = { phase: 'place', ...rad }
+          return
+        }
+        if (e1.kind === 'arc') {
+          const rad = radiusDimensionDraftFromArc(e1, ws, wx, wy)
+          if (!rad) return
+          dimPlacementRef.current = { phase: 'place', ...rad }
+          return
+        }
+        if (e1.kind === 'spline') {
+          const rad = splineCurvatureDimensionDraft(e1, ws, wx, wy)
           if (!rad) return
           dimPlacementRef.current = { phase: 'place', ...rad }
           return
@@ -2565,16 +2731,7 @@ export function WorkspaceCanvas({
         let next = null
         if (ptHit) next = { kind: 'point', id: ptHit.id }
         else if (toolRef.current === TOOL.DIMENSION) {
-          const ws = workspaceRef.current
-          const pmapH = new Map(pts.map((q) => [q.id, q]))
-          const hiH = findNearestSegmentHit(
-            ws.segments ?? [],
-            pmapH,
-            wx,
-            wy,
-            tol,
-          )
-          next = hiH ? { kind: 'segment', id: hiH.seg.id } : null
+          next = pickDimensionEntity(wx, wy, workspaceRef.current, opt.zoom)
         } else {
           next = pickShapeAtWorld(wx, wy, workspaceRef.current, tol)
         }
@@ -2612,13 +2769,34 @@ export function WorkspaceCanvas({
           const showDeg = ldo?.showAngleDegrees !== false
           const z = opt.zoom
           if (pl.dimType === 'distance' && pl.ax != null) {
-            const off = linearDimensionOffsetFromCursor(
+            const dk = pl.distanceKind
+            const smart =
+              dk === 'pointPoint' || dk === 'segment'
+            const proj = smart
+              ? classifyLinearDimensionProjection(
+                  wx,
+                  wy,
+                  pl.ax,
+                  pl.ay,
+                  pl.bx,
+                  pl.by,
+                )
+              : 'aligned'
+            const off = linearDimensionOffsetForProjection(
               wx,
               wy,
               pl.ax,
               pl.ay,
               pl.bx,
               pl.by,
+              proj,
+            )
+            const v = linearDistanceValueForProjection(
+              pl.ax,
+              pl.ay,
+              pl.bx,
+              pl.by,
+              proj,
             )
             setPreview({
               kind: 'linearDimension',
@@ -2627,7 +2805,8 @@ export function WorkspaceCanvas({
               bx: pl.bx,
               by: pl.by,
               offsetWorld: off,
-              label: `${formatLengthMmForDisplay(pl.value, du)} ${unit}`,
+              projection: proj,
+              label: `${formatLengthMmForDisplay(v, du)} ${unit}`,
             })
           } else if (pl.dimType === 'angle' && pl.a0 != null) {
             const r = Math.max(12 / z, Math.hypot(wx - pl.vx, wy - pl.vy))
@@ -2649,7 +2828,17 @@ export function WorkspaceCanvas({
               cx: pl.cx,
               cy: pl.cy,
               r: pl.r,
+              leaderAngle: pl.leaderAngle ?? 0,
               label: `R ${formatLengthMmForDisplay(pl.value, du)} ${unit}`,
+            })
+          } else if (pl.dimType === 'diameter') {
+            setPreview({
+              kind: 'radialDimension',
+              cx: pl.cx,
+              cy: pl.cy,
+              r: pl.r,
+              leaderAngle: pl.leaderAngle ?? 0,
+              label: `Ø ${formatLengthMmForDisplay(pl.value, du)} ${unit}`,
             })
           }
         }

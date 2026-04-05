@@ -3,9 +3,27 @@ import { linearDistanceAnchorPoints } from './dimensionGeometry.js'
 import { ANSI_EXT_GAP_WORLD } from './DimensionRenderer.js'
 
 /** Default offset of dimension line from measured chord (world). */
-export const DRIVING_DIM_OFFSET_WORLD = 14
+export const DRIVING_DIM_OFFSET_WORLD = 24
 
 const ARROW_LEN = 9
+
+function radialLeaderLabelWorld(rc, zoom, leaderAngle) {
+  const z = zoom || 1
+  const { cx, cy, r } = rc
+  const ca = Math.cos(leaderAngle)
+  const sa = Math.sin(leaderAngle)
+  const gap = ANSI_EXT_GAP_WORLD
+  const pOut = { x: cx + ca * (r + gap), y: cy + sa * (r + gap) }
+  const radStub = 14 / z
+  const pBend = { x: pOut.x + ca * radStub, y: pOut.y + sa * radStub }
+  const shoulder = 42 / z
+  const hSign = ca >= 0 ? 1 : -1
+  const pLand = { x: pBend.x + hSign * shoulder, y: pBend.y }
+  return {
+    x: (pBend.x + pLand.x) / 2,
+    y: pLand.y - 6 / z,
+  }
+}
 
 /**
  * @param {object} dim
@@ -18,6 +36,7 @@ export function drivingDimensionLabelWorld(dim, data, zoom) {
   const segments = data.segments ?? []
   const pointById = new Map((data.points ?? []).map((p) => [p.id, p]))
   const circles = data.circles ?? []
+  const arcs = data.arcs ?? []
 
   if (dim.type === 'distance') {
     const anchors = linearDistanceAnchorPoints(dim, data)
@@ -25,13 +44,22 @@ export function drivingDimensionLabelWorld(dim, data, zoom) {
     const { ax, ay, bx, by } = anchors
     const mx = (ax + bx) / 2
     const my = (ay + by) / 2
+    const off = dim.offsetWorld ?? DRIVING_DIM_OFFSET_WORLD
+    const proj = dim.linearProjection ?? 'aligned'
+    if (proj === 'horizontal') {
+      const yDim = my + off
+      return { x: mx, y: yDim - 10 / z }
+    }
+    if (proj === 'vertical') {
+      const xDim = mx + off
+      return { x: xDim + 10 / z, y: my }
+    }
     const dx = bx - ax
     const dy = by - ay
     const len = Math.hypot(dx, dy)
     if (len < 1e-12) return null
     const nx = -dy / len
     const ny = dx / len
-    const off = dim.offsetWorld ?? DRIVING_DIM_OFFSET_WORLD
     return {
       x: mx + nx * off,
       y: my + ny * off,
@@ -42,17 +70,15 @@ export function drivingDimensionLabelWorld(dim, data, zoom) {
     (dim.type === 'radius' || dim.type === 'diameter') &&
     dim.targets?.[0]
   ) {
-    const c = circles.find((x) => x.id === dim.targets[0])
-    if (!c) return null
-    const rc = circleWithResolvedCenter(c, pointById)
+    const tid = dim.targets[0]
+    const c = circles.find((x) => x.id === tid)
+    const arc = arcs.find((x) => x.id === tid)
+    const shape = c ?? arc
+    if (!shape) return null
+    const rc = circleWithResolvedCenter(shape, pointById)
     if (rc.r < 1e-9) return null
-    const { cx, cy, r } = rc
-    const gap = ANSI_EXT_GAP_WORLD
-    const p0x = cx + (r + gap)
-    const p0y = cy
-    const p1x = cx + (r + gap + ARROW_LEN / z + 22 / z)
-    const midX = (p0x + p1x) / 2
-    return { x: midX, y: cy - 8 / z }
+    const la = dim.leaderAngle ?? 0
+    return radialLeaderLabelWorld(rc, zoom, la)
   }
 
   if (dim.type === 'angle' && dim.targets?.length === 3) {
