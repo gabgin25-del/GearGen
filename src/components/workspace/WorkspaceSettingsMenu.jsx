@@ -1,5 +1,82 @@
 import { Settings, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+
+function DrivingDimensionValueInput({
+  dim,
+  documentUnits,
+  showAngleDegrees = true,
+  setDrivingDimensionValue,
+}) {
+  const committedStr =
+    dim.type === 'angle'
+      ? dim.value != null && Number.isFinite(dim.value)
+        ? showAngleDegrees
+          ? String((dim.value * 180) / Math.PI)
+          : String(dim.value)
+        : ''
+      : dim.value != null && Number.isFinite(dim.value)
+        ? String(worldMmToDisplay(dim.value, documentUnits))
+        : ''
+
+  const [draft, setDraft] = useState(committedStr)
+
+  useEffect(() => {
+    setDraft(committedStr)
+  }, [dim.id, committedStr])
+
+  const sanitize = (raw) => {
+    if (dim.type === 'angle') {
+      return raw.replace(/[^\d.+\-eE]/g, '')
+    }
+    return raw.replace(/[^\d.]/g, '')
+  }
+
+  const commit = () => {
+    const raw = draft.trim()
+    if (raw === '') {
+      setDraft(committedStr)
+      return
+    }
+    const v = Number.parseFloat(raw)
+    if (!Number.isFinite(v)) {
+      setDraft(committedStr)
+      return
+    }
+    if (dim.type === 'angle') {
+      const rad = showAngleDegrees ? (v * Math.PI) / 180 : v
+      if (rad <= 0 || rad > 2 * Math.PI + 1e-9) {
+        setDraft(committedStr)
+        return
+      }
+      setDrivingDimensionValue?.(dim.id, rad)
+      return
+    }
+    if (v <= 0) {
+      setDraft(committedStr)
+      return
+    }
+    setDrivingDimensionValue?.(dim.id, v)
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      className="rounded border border-gg-border bg-gg-workspace px-2 py-1 text-[12px] text-gg-text"
+      value={draft}
+      placeholder={committedStr || undefined}
+      onChange={(e) => setDraft(sanitize(e.target.value))}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          commit()
+        }
+      }}
+    />
+  )
+}
 import { CollapsibleSection } from '../ui/CollapsibleSection.jsx'
 import { ErrorBoundary } from '../ui/ErrorBoundary.jsx'
 import { inferDistanceKind } from '../../lib/dimensionGeometry.js'
@@ -456,49 +533,21 @@ export function WorkspaceSettingsMenu({
                           dim.type === 'diameter') && (
                           <label className="flex flex-col gap-0.5 text-[11px] text-gg-muted">
                             Value ({worldUnitLabel || 'mm'} display units)
-                            <input
-                              type="number"
-                              step="any"
-                              min={0.0001}
-                              className="rounded border border-gg-border bg-gg-workspace px-2 py-1 text-[12px] text-gg-text"
-                              value={
-                                dim.value != null && Number.isFinite(dim.value)
-                                  ? String(
-                                      worldMmToDisplay(
-                                        dim.value,
-                                        documentUnits,
-                                      ),
-                                    )
-                                  : ''
-                              }
-                              onChange={(e) =>
-                                setDrivingDimensionValue?.(dim.id, e.target.value)
-                              }
+                            <DrivingDimensionValueInput
+                              dim={dim}
+                              documentUnits={documentUnits}
+                              setDrivingDimensionValue={setDrivingDimensionValue}
                             />
                           </label>
                         )}
                         {dim.type === 'angle' && (
                           <label className="flex flex-col gap-0.5 text-[11px] text-gg-muted">
                             {showAngleDegrees ? 'Angle (°)' : 'Angle (rad)'}
-                            <input
-                              type="number"
-                              step="any"
-                              className="rounded border border-gg-border bg-gg-workspace px-2 py-1 text-[12px] text-gg-text"
-                              value={
-                                dim.value != null && Number.isFinite(dim.value)
-                                  ? showAngleDegrees
-                                    ? String((dim.value * 180) / Math.PI)
-                                    : String(dim.value)
-                                  : ''
-                              }
-                              onChange={(e) => {
-                                const x = Number.parseFloat(e.target.value)
-                                if (!Number.isFinite(x)) return
-                                const rad = showAngleDegrees
-                                  ? (x * Math.PI) / 180
-                                  : x
-                                setDrivingDimensionValue?.(dim.id, rad)
-                              }}
+                            <DrivingDimensionValueInput
+                              dim={dim}
+                              documentUnits={documentUnits}
+                              showAngleDegrees={showAngleDegrees}
+                              setDrivingDimensionValue={setDrivingDimensionValue}
                             />
                           </label>
                         )}

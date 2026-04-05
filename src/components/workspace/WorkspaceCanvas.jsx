@@ -72,6 +72,36 @@ import { collectSketchEntitiesInWorldRect } from '../../lib/marqueeSelection.js'
 import { ARC_MODE, TOOL } from '../../hooks/useWorkspaceScene.js'
 import { useElementSize } from '../../hooks/useElementSize.js'
 
+/**
+ * @param {object} dim
+ * @param {object} data
+ * @returns {{ cx: number; cy: number } | null}
+ */
+function radialDimCenterWorld(dim, data) {
+  if (dim.splineCurvature && dim.dimCx != null && dim.dimCy != null) {
+    return { cx: dim.dimCx, cy: dim.dimCy }
+  }
+  const tid = dim.targets?.[0]
+  if (!tid) return null
+  const pmap = new Map((data.points ?? []).map((p) => [p.id, p]))
+  const circles = data.circles ?? []
+  const arcs = data.arcs ?? []
+  const shape =
+    circles.find((c) => c.id === tid) ?? arcs.find((a) => a.id === tid)
+  if (!shape) return null
+  const rc = circleWithResolvedCenter(shape, pmap)
+  if (rc.r < 1e-9) return null
+  return { cx: rc.cx, cy: rc.cy }
+}
+
+function sanitizeDimEditDraft(raw, dimType) {
+  const s = String(raw ?? '')
+  if (dimType === 'angle') {
+    return s.replace(/[^\d.+\-eE]/g, '')
+  }
+  return s.replace(/[^\d.]/g, '')
+}
+
 /** Ruler-style cursor for dimension tool (fallback: crosshair). */
 const DIMENSION_CURSOR =
   'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2394a3b8\' stroke-width=\'1.5\' stroke-linecap=\'round\'%3E%3Cpath d=\'M5 19L19 5M7 15l2-2m2-2 2-2m2-2 2-2\'/%3E%3C/svg%3E") 2 20, crosshair'
@@ -422,6 +452,9 @@ export function WorkspaceCanvas({
   const [dimEdit, setDimEdit] = useState(null)
   const dimEditRef = useRef(null)
   const dimInputRef = useRef(null)
+  /** Live radial Ø/R leader drag (visual only until pointer up). */
+  const radialLeaderDragRef = useRef(null)
+  const paintRef = useRef(() => {})
   const setDrivingDimRef = useRef(setDrivingDimensionValue)
   const sketchSelectionRef = useRef(sketchSelection)
   const sketchLockStateRef = useRef(sketchLockState)
@@ -576,17 +609,21 @@ export function WorkspaceCanvas({
   }, [dimEdit])
 
   useEffect(() => {
-    if (!dimEdit) return
+    if (!dimEdit?.openKey) return
     const id = requestAnimationFrame(() => {
       dimInputRef.current?.focus()
       dimInputRef.current?.select?.()
     })
     return () => cancelAnimationFrame(id)
-  }, [dimEdit])
+  }, [dimEdit?.openKey])
 
   const onCanvasDoubleClick = useCallback(
     (e) => {
-      if (tool !== TOOL.SELECT || !setDrivingDimensionValue) return
+      if (
+        (tool !== TOOL.SELECT && tool !== TOOL.DIMENSION) ||
+        !setDrivingDimensionValue
+      )
+        return
       const canvas = canvasRef.current
       if (!canvas) return
       e.preventDefault()
@@ -628,6 +665,8 @@ export function WorkspaceCanvas({
         left: e.clientX - rect.left,
         top: e.clientY - rect.top,
         draft,
+        baselineDraft: draft,
+        openKey: Date.now(),
       })
     },
     [tool, setDrivingDimensionValue, drivingDimEditDraft],
@@ -644,8 +683,9 @@ export function WorkspaceCanvas({
     const raw = String(cur.draft).trim()
     let v = Number.parseFloat(raw)
     if (raw === '' || !Number.isFinite(v)) {
-      dimEditRef.current = null
-      setDimEdit(null)
+      setDimEdit((prev) =>
+        prev ? { ...prev, draft: prev.baselineDraft ?? '' } : null,
+      )
       return
     }
     if (cur.editInDegrees) v = (v * Math.PI) / 180
@@ -654,13 +694,15 @@ export function WorkspaceCanvas({
       (t === 'distance' || t === 'radius' || t === 'diameter') &&
       v <= 0
     ) {
-      dimEditRef.current = null
-      setDimEdit(null)
+      setDimEdit((prev) =>
+        prev ? { ...prev, draft: prev.baselineDraft ?? '' } : null,
+      )
       return
     }
     if (t === 'angle' && (v <= 0 || v > 2 * Math.PI + 1e-9)) {
-      dimEditRef.current = null
-      setDimEdit(null)
+      setDimEdit((prev) =>
+        prev ? { ...prev, draft: prev.baselineDraft ?? '' } : null,
+      )
       return
     }
     dimEditRef.current = null
@@ -767,6 +809,17 @@ export function WorkspaceCanvas({
         ? [...strokes, { id: '__live', points: liveStroke.points }]
         : strokes
 
+    const rd = radialLeaderDragRef.current
+    const dimensionsDraw =
+      rd?.dimId != null
+        ? dimensions.map((d) =>
+            d.id === rd.dimId &&
+            (d.type === 'radius' || d.type === 'diameter')
+              ? { ...d, leaderAngle: rd.leaderAngle }
+              : d,
+          )
+        : dimensions
+
     drawWorkspaceScene(ctx, {
       width: size.width,
       height: size.height,
@@ -793,7 +846,7 @@ export function WorkspaceCanvas({
           ? geomDraft.vertexIds[0]
           : null,
       constraints,
-      dimensions,
+      dimensions: dimensionsDraw,
       showDimensions,
       showRelations,
       sketchSelection,
@@ -834,6 +887,10 @@ export function WorkspaceCanvas({
     sketchLockState,
     snapGuideHighlight,
   ])
+
+  useEffect(() => {
+    paintRef.current = paint
+  }, [paint])
 
   useEffect(() => {
     paint()
@@ -1111,7 +1168,7 @@ export function WorkspaceCanvas({
           }
           return
         }
-        if (setDrivingDimRef.current) {
+        if (setDrivingDimRef.current && !dimEditRef.current) {
           const dimPickId = hitDrivingDimension(
             wx,
             wy,
@@ -1124,22 +1181,22 @@ export function WorkspaceCanvas({
               (d) => d.id === dimPickId,
             )
             if (
-              dim?.type === 'distance' ||
-              dim?.type === 'radius' ||
-              dim?.type === 'diameter' ||
-              dim?.type === 'angle'
+              dim &&
+              (dim.type === 'radius' || dim.type === 'diameter')
             ) {
-              const rect = containerRef.current?.getBoundingClientRect()
-              if (rect) {
-                const { draft, editInDegrees } = drivingDimEditDraft(dim)
-                setDimEdit({
-                  id: dimPickId,
-                  dimType: dim.type,
-                  editInDegrees,
-                  left: e.clientX - rect.left,
-                  top: e.clientY - rect.top,
-                  draft,
-                })
+              const cen = radialDimCenterWorld(dim, workspaceRef.current)
+              if (cen) {
+                e.currentTarget.setPointerCapture(e.pointerId)
+                const ang = Math.atan2(wy - cen.cy, wx - cen.cx)
+                radialLeaderDragRef.current = {
+                  dimId: dimPickId,
+                  leaderAngle: ang,
+                }
+                dragRef.current = {
+                  type: 'radialLeader',
+                  dimId: dimPickId,
+                }
+                paintRef.current()
                 return
               }
             }
@@ -1408,7 +1465,7 @@ export function WorkspaceCanvas({
       }
 
       if (t === TOOL.DIMENSION) {
-        if (setDrivingDimRef.current) {
+        if (setDrivingDimRef.current && !dimEditRef.current) {
           const dimPickId = hitDrivingDimension(
             wx,
             wy,
@@ -1421,22 +1478,22 @@ export function WorkspaceCanvas({
               (d) => d.id === dimPickId,
             )
             if (
-              dim?.type === 'distance' ||
-              dim?.type === 'radius' ||
-              dim?.type === 'diameter' ||
-              dim?.type === 'angle'
+              dim &&
+              (dim.type === 'radius' || dim.type === 'diameter')
             ) {
-              const rect = containerRef.current?.getBoundingClientRect()
-              if (rect) {
-                const { draft, editInDegrees } = drivingDimEditDraft(dim)
-                setDimEdit({
-                  id: dimPickId,
-                  dimType: dim.type,
-                  editInDegrees,
-                  left: e.clientX - rect.left,
-                  top: e.clientY - rect.top,
-                  draft,
-                })
+              const cen = radialDimCenterWorld(dim, workspaceRef.current)
+              if (cen) {
+                e.currentTarget.setPointerCapture(e.pointerId)
+                const ang = Math.atan2(wy - cen.cy, wx - cen.cx)
+                radialLeaderDragRef.current = {
+                  dimId: dimPickId,
+                  leaderAngle: ang,
+                }
+                dragRef.current = {
+                  type: 'radialLeader',
+                  dimId: dimPickId,
+                }
+                paintRef.current()
                 return
               }
             }
@@ -1498,16 +1555,19 @@ export function WorkspaceCanvas({
               return { ...d, dimensions: [...dims, row] }
             })
             if (rectPl && setDrivingDimRef.current) {
+              const d0 =
+                value != null && Number.isFinite(value)
+                  ? String(worldMmToDisplay(value, duPl))
+                  : ''
               setDimEdit({
                 id: dimId,
                 dimType: 'distance',
                 editInDegrees: false,
                 left: e.clientX - rectPl.left + 12,
                 top: e.clientY - rectPl.top - 30,
-                draft:
-                  value != null && Number.isFinite(value)
-                    ? String(worldMmToDisplay(value, duPl))
-                    : '',
+                draft: d0,
+                baselineDraft: d0,
+                openKey: Date.now(),
               })
             }
             return
@@ -1545,18 +1605,21 @@ export function WorkspaceCanvas({
             })
             if (rectAng && setDrivingDimRef.current) {
               const v0 = pl.value
+              const dAng =
+                v0 != null && Number.isFinite(v0)
+                  ? showDegPl
+                    ? String((v0 * 180) / Math.PI)
+                    : String(v0)
+                  : ''
               setDimEdit({
                 id: dimIdAng,
                 dimType: 'angle',
                 editInDegrees: showDegPl,
                 left: e.clientX - rectAng.left + 12,
                 top: e.clientY - rectAng.top - 30,
-                draft:
-                  v0 != null && Number.isFinite(v0)
-                    ? showDegPl
-                      ? String((v0 * 180) / Math.PI)
-                      : String(v0)
-                    : '',
+                draft: dAng,
+                baselineDraft: dAng,
+                openKey: Date.now(),
               })
             }
             return
@@ -1596,16 +1659,19 @@ export function WorkspaceCanvas({
             })
             if (rectR && setDrivingDimRef.current) {
               const vr = pl.value
+              const dR =
+                vr != null && Number.isFinite(vr)
+                  ? String(worldMmToDisplay(vr, duR))
+                  : ''
               setDimEdit({
                 id: dimIdR,
                 dimType: 'radius',
                 editInDegrees: false,
                 left: e.clientX - rectR.left + 12,
                 top: e.clientY - rectR.top - 30,
-                draft:
-                  vr != null && Number.isFinite(vr)
-                    ? String(worldMmToDisplay(vr, duR))
-                    : '',
+                draft: dR,
+                baselineDraft: dR,
+                openKey: Date.now(),
               })
             }
             return
@@ -1643,16 +1709,19 @@ export function WorkspaceCanvas({
             })
             if (rectD && setDrivingDimRef.current) {
               const vd = pl.value
+              const dD =
+                vd != null && Number.isFinite(vd)
+                  ? String(worldMmToDisplay(vd, duD))
+                  : ''
               setDimEdit({
                 id: dimIdD,
                 dimType: 'diameter',
                 editInDegrees: false,
                 left: e.clientX - rectD.left + 12,
                 top: e.clientY - rectD.top - 30,
-                draft:
-                  vd != null && Number.isFinite(vd)
-                    ? String(worldMmToDisplay(vd, duD))
-                    : '',
+                draft: dD,
+                baselineDraft: dD,
+                openKey: Date.now(),
               })
             }
             return
@@ -2603,6 +2672,31 @@ export function WorkspaceCanvas({
         return
       }
 
+      if (d?.type === 'radialLeader' && d.dimId) {
+        const { x: lx, y: ly } = canvasLocalFromClient(
+          canvas,
+          e.clientX,
+          e.clientY,
+        )
+        const wx = (lx - p.x) / opt.zoom
+        const wy = (ly - p.y) / opt.zoom
+        const dim = (workspaceRef.current.dimensions ?? []).find(
+          (x) => x.id === d.dimId,
+        )
+        if (!dim) {
+          radialLeaderDragRef.current = null
+          dragRef.current = null
+          paintRef.current()
+          return
+        }
+        const cen = radialDimCenterWorld(dim, workspaceRef.current)
+        if (!cen) return
+        const leaderAngle = Math.atan2(wy - cen.cy, wx - cen.cx)
+        radialLeaderDragRef.current = { dimId: d.dimId, leaderAngle }
+        paintRef.current()
+        return
+      }
+
       if (d?.type === 'marquee') {
         const { x: lx2, y: ly2 } = canvasLocalFromClient(
           canvas,
@@ -3240,6 +3334,29 @@ export function WorkspaceCanvas({
         return
       }
 
+      if (d?.type === 'radialLeader') {
+        const rd = radialLeaderDragRef.current
+        radialLeaderDragRef.current = null
+        dragRef.current = null
+        if (rd?.dimId != null) {
+          commit((data) => ({
+            ...data,
+            dimensions: (data.dimensions ?? []).map((dm) =>
+              dm.id === rd.dimId
+                ? { ...dm, leaderAngle: rd.leaderAngle }
+                : dm,
+            ),
+          }))
+        }
+        paintRef.current()
+        try {
+          e.currentTarget.releasePointerCapture(e.pointerId)
+        } catch {
+          /* ignore */
+        }
+        return
+      }
+
       if (d?.type === 'movePoint') {
         dragRef.current = null
         setSnapGuideHighlight(null)
@@ -3359,14 +3476,23 @@ export function WorkspaceCanvas({
             </label>
             <input
               ref={dimInputRef}
-              type="number"
-              step="any"
-              min={0.0001}
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
               className="w-full rounded border border-gg-border bg-gg-canvas-bg px-2 py-1.5 text-[13px] text-gg-text tabular-nums"
               value={dimEdit.draft}
+              placeholder={dimEdit.baselineDraft ?? ''}
               onChange={(ev) =>
                 setDimEdit((prev) =>
-                  prev ? { ...prev, draft: ev.target.value } : prev,
+                  prev
+                    ? {
+                        ...prev,
+                        draft: sanitizeDimEditDraft(
+                          ev.target.value,
+                          prev.dimType,
+                        ),
+                      }
+                    : prev,
                 )
               }
               onKeyDown={(ev) => {

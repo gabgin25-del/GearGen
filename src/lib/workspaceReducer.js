@@ -54,11 +54,52 @@ export function cloneWorkspaceData(data) {
 }
 
 /**
+ * Remove whole-sketch translation drift when the only world anchor is fixOrigin → (0,0).
+ * Skips if other constraints pin coordinates in absolute space.
+ * @param {object} data
+ */
+function reanchorFixOriginSketch(data) {
+  const cons = data.constraints ?? []
+  if (
+    cons.some(
+      (c) =>
+        c.type === 'anchorAt' ||
+        c.type === 'lockCoordX' ||
+        c.type === 'lockCoordY',
+    )
+  ) {
+    return data
+  }
+  const fix = cons.find(
+    (c) =>
+      c.type === 'fixOrigin' &&
+      c.targets?.length === 1 &&
+      c.targets[0].kind === 'point',
+  )
+  if (!fix) return data
+  const pid = fix.targets[0].id
+  const p = data.points.find((q) => q.id === pid)
+  if (!p) return data
+  const dx = -p.x
+  const dy = -p.y
+  if (Math.hypot(dx, dy) < 1e-12) return data
+  return {
+    ...data,
+    points: data.points.map((pt) => ({
+      ...pt,
+      x: pt.x + dx,
+      y: pt.y + dy,
+    })),
+  }
+}
+
+/**
  * Run GCS after geometry-changing commits / live applies.
  * @param {object} data
  */
 export function finalizeSketchData(data) {
-  return solveGCS(data, { maxIter: 40, tol: 1e-5 })
+  const solved = solveGCS(data, { maxIter: 40, tol: 1e-5 })
+  return reanchorFixOriginSketch(solved)
 }
 
 const MAX_HISTORY = 80
