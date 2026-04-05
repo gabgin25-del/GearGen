@@ -483,6 +483,8 @@ export function WorkspaceCanvas({
   const [dimEdit, setDimEdit] = useState(null)
   const dimEditRef = useRef(null)
   const dimInputRef = useRef(null)
+  /** Required for react-draggable on React 19 (findDOMNode was removed). */
+  const dimDragNodeRef = useRef(null)
   /** Live radial Ø/R leader drag (visual only until pointer up). */
   const radialLeaderDragRef = useRef(null)
   /** Live radial shoulder length drag (leaderShoulderWorld). */
@@ -3535,12 +3537,15 @@ export function WorkspaceCanvas({
         >
           <Draggable
             key={dimEdit.openKey ?? dimEdit.id}
-            bounds="parent"
+            nodeRef={dimDragNodeRef}
             handle=".dim-drag-handle"
             cancel="input"
             defaultPosition={{ x: dimEdit.left, y: dimEdit.top }}
           >
-            <div className="pointer-events-auto absolute left-0 top-0 flex min-w-[10rem] max-w-[16rem] flex-col overflow-hidden rounded-md border border-gg-border bg-gg-workspace shadow-lg">
+            <div
+              ref={dimDragNodeRef}
+              className="pointer-events-auto absolute left-0 top-0 flex min-w-[10rem] max-w-[16rem] flex-col overflow-hidden rounded-md border border-gg-border bg-gg-workspace shadow-lg"
+            >
               <div className="dim-drag-handle flex cursor-grab touch-none items-center justify-between gap-1 rounded-t-md border-b border-gg-border/60 bg-gg-canvas-bg/40 px-2 py-1 active:cursor-grabbing">
                 <span className="text-[9px] font-semibold uppercase tracking-wide text-gg-muted">
                   Driving dimension
