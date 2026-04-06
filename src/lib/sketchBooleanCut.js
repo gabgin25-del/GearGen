@@ -1,5 +1,6 @@
 import { circleWithResolvedCenter } from './circleResolve.js'
 import { pointInPolygon } from './hitTest.js'
+import { findSegmentFaceRingContainingPoint } from './segmentPlanarFaces.js'
 
 const HOLE_VERTS = 28
 
@@ -19,6 +20,58 @@ export function findFilledPolygonContaining(data, wx, wy) {
     if (pointInPolygon(wx, wy, verts)) return poly
   }
   return null
+}
+
+/**
+ * Any closed polygon loop containing the point (filled or not).
+ * @param {object} data
+ * @param {number} wx
+ * @param {number} wy
+ */
+export function findAnyPolygonContainingPoint(data, wx, wy) {
+  const pmap = new Map((data.points ?? []).map((p) => [p.id, p]))
+  const polys = data.polygons ?? []
+  for (let i = polys.length - 1; i >= 0; i--) {
+    const poly = polys[i]
+    const verts = poly.vertexIds.map((id) => pmap.get(id)).filter(Boolean)
+    if (verts.length < 3) continue
+    if (pointInPolygon(wx, wy, verts)) return poly
+  }
+  return null
+}
+
+/**
+ * @param {object} data
+ * @param {string[]} ring point ids in order around a segment-only face
+ * @param {(p: string) => string} nextId
+ * @param {string} fillRgba
+ */
+export function materializeSegmentFaceAsPolygon(data, ring, nextId, fillRgba) {
+  if (!ring || ring.length < 3) return null
+  const segs = data.segments ?? []
+  const boundarySegmentIds = []
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]
+    const b = ring[(i + 1) % ring.length]
+    const seg = segs.find(
+      (s) => (s.a === a && s.b === b) || (s.a === b && s.b === a),
+    )
+    if (!seg) return null
+    boundarySegmentIds.push(seg.id)
+  }
+  const id = nextId('poly')
+  const poly = {
+    id,
+    vertexIds: [...ring],
+    outlineViaSegments: true,
+    boundarySegmentIds,
+    fill: fillRgba,
+    geoRegistered: true,
+  }
+  return {
+    ...data,
+    polygons: [...(data.polygons ?? []), poly],
+  }
 }
 
 /**
@@ -50,7 +103,8 @@ export function findFilledCircleContaining(data, wx, wy) {
 export function addCircularHoleToPolygon(data, polyId, cx, cy, r, nextId) {
   if (r < 1e-6) return null
   const poly = (data.polygons ?? []).find((p) => p.id === polyId)
-  if (!poly || !poly.fill) return null
+  if (!poly) return null
+  const polyUse = poly.fill ? poly : { ...poly, fill: 'auto' }
 
   const holeIds = []
   const newPts = []
@@ -75,14 +129,14 @@ export function addCircularHoleToPolygon(data, polyId, cx, cy, r, nextId) {
       geoRegistered: true,
     })
   }
-  const prevHoles = poly.holes ?? []
+  const prevHoles = polyUse.holes ?? []
   return {
     ...data,
     points: [...data.points, ...newPts],
     segments: [...data.segments, ...newSegs],
     polygons: data.polygons.map((p) =>
       p.id === polyId
-        ? { ...p, holes: [...prevHoles, holeIds] }
+        ? { ...polyUse, holes: [...prevHoles, holeIds] }
         : p,
     ),
   }
@@ -124,7 +178,8 @@ export function addRectangularHoleToPolygon(data, polyId, rect, nextId) {
   const { minx, miny, maxx, maxy } = rect
   if (maxx - minx < 1e-6 || maxy - miny < 1e-6) return null
   const poly = (data.polygons ?? []).find((p) => p.id === polyId)
-  if (!poly || !poly.fill) return null
+  if (!poly) return null
+  const polyUse = poly.fill ? poly : { ...poly, fill: 'auto' }
   const pmap = new Map((data.points ?? []).map((p) => [p.id, p]))
   const cx = (minx + maxx) / 2
   const cy = (miny + maxy) / 2
@@ -152,14 +207,14 @@ export function addRectangularHoleToPolygon(data, polyId, rect, nextId) {
     { id: s2, a: p3, b: p4, geoRegistered: true },
     { id: s3, a: p4, b: p1, geoRegistered: true },
   ]
-  const prevHoles = poly.holes ?? []
+  const prevHoles = polyUse.holes ?? []
   return {
     ...data,
     points: [...data.points, ...newPts],
     segments: [...data.segments, ...newSegs],
     polygons: data.polygons.map((p) =>
       p.id === polyId
-        ? { ...p, holes: [...prevHoles, holeIds] }
+        ? { ...polyUse, holes: [...prevHoles, holeIds] }
         : p,
     ),
   }
@@ -167,12 +222,27 @@ export function addRectangularHoleToPolygon(data, polyId, rect, nextId) {
 
 /**
  * Try to cut a circle-shaped void into a filled region; returns updated data or null.
+ * @param {{ defaultPolygonFill?: string }} [opts]
  */
-export function trySubtractCircleFromFill(data, cx, cy, r, nextId) {
-  const poly = findFilledPolygonContaining(data, cx, cy)
-  if (poly) return addCircularHoleToPolygon(data, poly.id, cx, cy, r, nextId)
-  const fc = findFilledCircleContaining(data, cx, cy)
-  if (fc) return addCircularHoleToCircle(data, fc.circle.id, cx, cy, r)
+export function trySubtractCircleFromFill(data, cx, cy, r, nextId, opts = {}) {
+  const defaultFill =
+    opts.defaultPolygonFill ?? 'rgba(59, 130, 246, 0.22)'
+  let d = data
+  let poly = findFilledPolygonContaining(d, cx, cy)
+  if (!poly) poly = findAnyPolygonContainingPoint(d, cx, cy)
+  if (!poly) {
+    const ring = findSegmentFaceRingContainingPoint(d, cx, cy)
+    if (ring) {
+      const next = materializeSegmentFaceAsPolygon(d, ring, nextId, defaultFill)
+      if (next) {
+        d = next
+        poly = d.polygons[d.polygons.length - 1]
+      }
+    }
+  }
+  if (poly) return addCircularHoleToPolygon(d, poly.id, cx, cy, r, nextId)
+  const fc = findFilledCircleContaining(d, cx, cy)
+  if (fc) return addCircularHoleToCircle(d, fc.circle.id, cx, cy, r)
   return null
 }
 
@@ -180,19 +250,34 @@ export function trySubtractCircleFromFill(data, cx, cy, r, nextId) {
  * @param {object} data
  * @param {{ minx: number; miny: number; maxx: number; maxy: number }} rect
  * @param {(p: string) => string} nextId
+ * @param {{ defaultPolygonFill?: string }} [opts]
  */
-export function trySubtractRectFromFill(data, rect, nextId) {
+export function trySubtractRectFromFill(data, rect, nextId, opts = {}) {
+  const defaultFill =
+    opts.defaultPolygonFill ?? 'rgba(59, 130, 246, 0.22)'
   const cx = (rect.minx + rect.maxx) / 2
   const cy = (rect.miny + rect.maxy) / 2
-  const poly = findFilledPolygonContaining(data, cx, cy)
-  if (poly) return addRectangularHoleToPolygon(data, poly.id, rect, nextId)
-  const pmap = new Map((data.points ?? []).map((p) => [p.id, p]))
-  for (const c of data.circles ?? []) {
+  let d = data
+  let poly = findFilledPolygonContaining(d, cx, cy)
+  if (!poly) poly = findAnyPolygonContainingPoint(d, cx, cy)
+  if (!poly) {
+    const ring = findSegmentFaceRingContainingPoint(d, cx, cy)
+    if (ring) {
+      const next = materializeSegmentFaceAsPolygon(d, ring, nextId, defaultFill)
+      if (next) {
+        d = next
+        poly = d.polygons[d.polygons.length - 1]
+      }
+    }
+  }
+  if (poly) return addRectangularHoleToPolygon(d, poly.id, rect, nextId)
+  const pmap = new Map((d.points ?? []).map((p) => [p.id, p]))
+  for (const c of d.circles ?? []) {
     if (!c.fill) continue
     const rc = circleWithResolvedCenter(c, pmap)
     if (rc.r < 1e-9) continue
     if (!pointInPolygon(cx, cy, approxCircleVerts(rc.cx, rc.cy, rc.r))) continue
-    return subtractRectFromFilledCircle(data, c.id, rect, nextId)
+    return subtractRectFromFilledCircle(d, c.id, rect, nextId)
   }
   return null
 }

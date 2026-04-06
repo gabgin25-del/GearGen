@@ -213,6 +213,51 @@ export function buildPlaneGcsPrimitives(data) {
         })
         continue
       }
+      // Point–circle coincident: PlaneGCS point_on_circle enforces distance(center, p) = radius.
+      if (t[0].kind === 'point' && t[1].kind === 'circle') {
+        const circ = circles.find((c) => c.id === t[1].id)
+        if (!circ?.centerId) continue
+        out.push({
+          id: nextCid('poc'),
+          type: 'point_on_circle',
+          p_id: t[0].id,
+          c_id: circlePrimitiveId(circ.id),
+        })
+        continue
+      }
+      if (t[0].kind === 'circle' && t[1].kind === 'point') {
+        const circ = circles.find((c) => c.id === t[0].id)
+        if (!circ?.centerId) continue
+        out.push({
+          id: nextCid('poc'),
+          type: 'point_on_circle',
+          p_id: t[1].id,
+          c_id: circlePrimitiveId(circ.id),
+        })
+        continue
+      }
+      if (t[0].kind === 'point' && t[1].kind === 'arc') {
+        const ar = arcs.find((x) => x.id === t[1].id)
+        if (!ar?.centerId || !ar.startId || !ar.endId) continue
+        out.push({
+          id: nextCid('poa'),
+          type: 'point_on_arc',
+          p_id: t[0].id,
+          a_id: arcPrimitiveId(ar.id),
+        })
+        continue
+      }
+      if (t[0].kind === 'arc' && t[1].kind === 'point') {
+        const ar = arcs.find((x) => x.id === t[0].id)
+        if (!ar?.centerId || !ar.startId || !ar.endId) continue
+        out.push({
+          id: nextCid('poa'),
+          type: 'point_on_arc',
+          p_id: t[1].id,
+          a_id: arcPrimitiveId(ar.id),
+        })
+        continue
+      }
     }
 
     if (

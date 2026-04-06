@@ -27,6 +27,39 @@ function movePoint(data, id, x, y) {
   }
 }
 
+function projectPointOntoCircleWorld(px, py, cx, cy, r) {
+  if (r < 1e-9) return null
+  const dx = px - cx
+  const dy = py - cy
+  const d = Math.hypot(dx, dy)
+  if (d < 1e-12) return { x: cx + r, y: cy }
+  const k = r / d
+  return { x: cx + dx * k, y: cy + dy * k }
+}
+
+/** @param {Map<string, { x: number; y: number }>} pmap */
+function closestPointOnArcSampled(px, py, arc, pmap) {
+  const C = pmap.get(arc.centerId)
+  const A = pmap.get(arc.startId)
+  if (!C || !A) return null
+  const r = Math.hypot(A.x - C.x, A.y - C.y)
+  if (r < 1e-9) return null
+  let best = { x: A.x, y: A.y }
+  let bestD = (px - best.x) ** 2 + (py - best.y) ** 2
+  for (let i = 0; i <= 32; i++) {
+    const u = i / 32
+    const ang = arc.a0 + u * arc.sweep
+    const x = C.x + r * Math.cos(ang)
+    const y = C.y + r * Math.sin(ang)
+    const d = (px - x) ** 2 + (py - y) ** 2
+    if (d < bestD) {
+      bestD = d
+      best = { x, y }
+    }
+  }
+  return best
+}
+
 function segEndpoints(data, segId) {
   const seg = data.segments.find((s) => s.id === segId)
   if (!seg) return null
@@ -130,6 +163,44 @@ export function applyConstraintEnforcement(data, constraint) {
       const p = data.points.find((q) => q.id === b.id)
       if (!ep || !p) return recomputeBoundArcs(data)
       const q = projectPointOnSegment(p.x, p.y, ep.pa.x, ep.pa.y, ep.pb.x, ep.pb.y)
+      return recomputeBoundArcs(movePoint(data, b.id, q.x, q.y))
+    }
+    if (a.kind === 'point' && b.kind === 'circle') {
+      const pmap = new Map(data.points.map((q) => [q.id, q]))
+      const p = pmap.get(a.id)
+      const c = data.circles?.find((x) => x.id === b.id)
+      if (!p || !c) return recomputeBoundArcs(data)
+      const rc = circleWithResolvedCenter(c, pmap)
+      const q = projectPointOntoCircleWorld(p.x, p.y, rc.cx, rc.cy, rc.r)
+      if (!q) return recomputeBoundArcs(data)
+      return recomputeBoundArcs(movePoint(data, a.id, q.x, q.y))
+    }
+    if (a.kind === 'circle' && b.kind === 'point') {
+      const pmap = new Map(data.points.map((q) => [q.id, q]))
+      const p = pmap.get(b.id)
+      const c = data.circles?.find((x) => x.id === a.id)
+      if (!p || !c) return recomputeBoundArcs(data)
+      const rc = circleWithResolvedCenter(c, pmap)
+      const q = projectPointOntoCircleWorld(p.x, p.y, rc.cx, rc.cy, rc.r)
+      if (!q) return recomputeBoundArcs(data)
+      return recomputeBoundArcs(movePoint(data, b.id, q.x, q.y))
+    }
+    if (a.kind === 'point' && b.kind === 'arc') {
+      const pmap = new Map(data.points.map((q) => [q.id, q]))
+      const p = pmap.get(a.id)
+      const arc = data.arcs?.find((x) => x.id === b.id)
+      if (!p || !arc) return recomputeBoundArcs(data)
+      const q = closestPointOnArcSampled(p.x, p.y, arc, pmap)
+      if (!q) return recomputeBoundArcs(data)
+      return recomputeBoundArcs(movePoint(data, a.id, q.x, q.y))
+    }
+    if (a.kind === 'arc' && b.kind === 'point') {
+      const pmap = new Map(data.points.map((q) => [q.id, q]))
+      const p = pmap.get(b.id)
+      const arc = data.arcs?.find((x) => x.id === a.id)
+      if (!p || !arc) return recomputeBoundArcs(data)
+      const q = closestPointOnArcSampled(p.x, p.y, arc, pmap)
+      if (!q) return recomputeBoundArcs(data)
       return recomputeBoundArcs(movePoint(data, b.id, q.x, q.y))
     }
     return recomputeBoundArcs(data)

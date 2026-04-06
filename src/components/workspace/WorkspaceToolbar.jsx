@@ -15,6 +15,7 @@ import {
   Redo2,
   Ruler,
   Scissors,
+  Slice,
   Trash2,
   Undo2,
 } from 'lucide-react'
@@ -54,6 +55,12 @@ const curveTools = [
     label:
       'Spline — click again to fold the spline toolbox; Enter commits; Esc commits and closes if near start',
     icon: GitBranch,
+  },
+  {
+    id: TOOL.TRIM,
+    label:
+      'Trim — click a segment to remove the span under the cursor (cuts at intersections)',
+    icon: Slice,
   },
 ]
 

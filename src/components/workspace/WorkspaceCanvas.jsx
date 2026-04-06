@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
   angleSweepCCW,
   arcSweepCenterFromCursor,
@@ -80,7 +81,12 @@ import {
   trySubtractCircleFromFill,
   trySubtractRectFromFill,
 } from '../../lib/sketchBooleanCut.js'
+import { trimSegmentAtClick } from '../../lib/sketchTrim.js'
 import { radialLeaderGeometry } from '../../lib/DimensionRenderer.js'
+import {
+  ObjectPropertiesModal,
+  SketchContextMenu,
+} from './ObjectPropertiesModal.jsx'
 
 /**
  * @param {object} dim
@@ -481,6 +487,8 @@ export function WorkspaceCanvas({
   const hoverHighlightRef = useRef(null)
   const [snapGuideHighlight, setSnapGuideHighlight] = useState(null)
   const [dimEdit, setDimEdit] = useState(null)
+  const [sketchContextMenu, setSketchContextMenu] = useState(null)
+  const [objectPropsEntity, setObjectPropsEntity] = useState(null)
   const dimEditRef = useRef(null)
   const dimInputRef = useRef(null)
   /** Required for react-draggable on React 19 (findDOMNode was removed). */
@@ -810,6 +818,57 @@ export function WorkspaceCanvas({
     constraints,
     dimensions,
   ])
+
+  const workspaceSnapshot = useMemo(
+    () => ({
+      points,
+      segments,
+      circles,
+      polygons,
+      arcs,
+      angles,
+      splines,
+      constraints,
+      dimensions,
+    }),
+    [
+      points,
+      segments,
+      circles,
+      polygons,
+      arcs,
+      angles,
+      splines,
+      constraints,
+      dimensions,
+    ],
+  )
+
+  useEffect(() => {
+    if (!sketchContextMenu) return
+    const close = (e) => {
+      const t = e.target
+      if (typeof t?.closest === 'function' && t.closest('[data-sketch-context-menu]')) {
+        return
+      }
+      setSketchContextMenu(null)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [sketchContextMenu])
+
+  useEffect(() => {
+    if (!objectPropsEntity) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setObjectPropsEntity(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [objectPropsEntity])
 
   useEffect(() => {
     selectedShapeRef.current = selectedShape
@@ -1386,6 +1445,27 @@ export function WorkspaceCanvas({
         return
       }
 
+      if (t === TOOL.TRIM) {
+        const pmapSel = new Map(pts.map((q) => [q.id, q]))
+        const segsW = workspaceRef.current.segments ?? []
+        const hitSeg = findNearestSegmentHit(segsW, pmapSel, wx, wy, tol)
+        if (hitSeg) {
+          const trimmed = trimSegmentAtClick(
+            workspaceRef.current,
+            hitSeg.seg.id,
+            wx,
+            wy,
+            nextId,
+            tol,
+          )
+          if (trimmed) {
+            checkpoint()
+            commit(() => trimmed)
+          }
+        }
+        return
+      }
+
       if (t === TOOL.FREEHAND) {
         e.currentTarget.setPointerCapture(e.pointerId)
         let w = pickWorldAtCursor(lx, ly, p, opt.zoom, pts, SNAP_PX, opt.snapToGrid, opt.gridStep)
@@ -1807,12 +1887,15 @@ export function WorkspaceCanvas({
           return
         }
         if (cutModeRef.current) {
+          const fill =
+            shapeStyleRef.current.shapeFillRgba ?? 'rgba(59, 130, 246, 0.22)'
           const carved = trySubtractCircleFromFill(
             workspaceRef.current,
             draft.cx,
             draft.cy,
             rad,
             nextId,
+            { defaultPolygonFill: fill },
           )
           if (carved) {
             commit(() => carved)
@@ -1874,10 +1957,13 @@ export function WorkspaceCanvas({
           return
         }
         if (cutModeRef.current) {
+          const fill =
+            shapeStyleRef.current.shapeFillRgba ?? 'rgba(59, 130, 246, 0.22)'
           const carved = trySubtractRectFromFill(
             workspaceRef.current,
             { minx, miny, maxx, maxy },
             nextId,
+            { defaultPolygonFill: fill },
           )
           if (carved) {
             commit(() => carved)
@@ -2922,7 +3008,7 @@ export function WorkspaceCanvas({
           if (pv.dimType === 'distance' && pv.ax != null) {
             const dk = pv.distanceKind
             const smart =
-              dk === 'pointPoint' || dk === 'segment'
+              dk === 'pointPoint' || dk === 'segment' || dk === 'pointLine'
             const proj = smart
               ? classifyLinearDimensionProjection(
                   wx,
@@ -3497,19 +3583,56 @@ export function WorkspaceCanvas({
     ],
   )
 
+  const handleCanvasContextMenu = useCallback((e) => {
+    e.preventDefault()
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const p = panRef.current
+    const opt = placementRef.current
+    const { x: lx, y: ly } = canvasLocalFromClient(
+      canvas,
+      e.clientX,
+      e.clientY,
+    )
+    const wx = (lx - p.x) / opt.zoom
+    const wy = (ly - p.y) / opt.zoom
+    const tol = SNAP_PX / opt.zoom
+    const ent = pickSketchEntity(
+      wx,
+      wy,
+      lx,
+      ly,
+      workspaceRef.current,
+      p,
+      opt.zoom,
+      tol,
+    )
+    if (!ent) return
+    const pad = 6
+    const maxX = (typeof window !== 'undefined' ? window.innerWidth : 9999) - 168
+    const maxY = (typeof window !== 'undefined' ? window.innerHeight : 9999) - 72
+    setSketchContextMenu({
+      x: Math.max(pad, Math.min(e.clientX, maxX)),
+      y: Math.max(pad, Math.min(e.clientY, maxY)),
+      entity: ent,
+    })
+  }, [])
+
   let cursorClass = 'cursor-crosshair'
   if (tool === TOOL.SELECT)
     cursorClass = 'cursor-default active:cursor-grabbing'
 
   return (
+    <>
     <div
       ref={containerRef}
-      className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-gg-border bg-gg-canvas-bg shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+      className="relative min-h-0 min-w-0 flex-1 overflow-visible"
     >
+      <div className="h-full min-h-0 w-full overflow-hidden rounded-lg border border-gg-border bg-gg-canvas-bg shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
       <canvas
         ref={canvasRef}
         className={`relative z-0 block touch-none select-none ${cursorClass}`}
-        onContextMenu={(ev) => ev.preventDefault()}
+        onContextMenu={handleCanvasContextMenu}
         onPointerDown={onPointerDown}
         onDoubleClick={onCanvasDoubleClick}
         onPointerMove={onPointerMove}
@@ -3530,9 +3653,10 @@ export function WorkspaceCanvas({
           Resizing…
         </div>
       )}
+      </div>
       {dimEdit ? (
         <div
-          className="pointer-events-none absolute inset-0 z-20"
+          className="pointer-events-none absolute inset-0 z-20 overflow-visible"
           aria-live="polite"
         >
           <Draggable
@@ -3603,5 +3727,33 @@ export function WorkspaceCanvas({
         </div>
       ) : null}
     </div>
+    {typeof document !== 'undefined' &&
+      sketchContextMenu &&
+      createPortal(
+        <SketchContextMenu
+          x={sketchContextMenu.x}
+          y={sketchContextMenu.y}
+          theme={theme}
+          onClose={() => setSketchContextMenu(null)}
+          onObjectProperties={() => {
+            setObjectPropsEntity(sketchContextMenu.entity)
+            setSketchContextMenu(null)
+          }}
+        />,
+        document.body,
+      )}
+    {typeof document !== 'undefined' &&
+      createPortal(
+        <ObjectPropertiesModal
+          open={!!objectPropsEntity}
+          entity={objectPropsEntity}
+          data={workspaceSnapshot}
+          theme={theme}
+          labelDrawOptions={labelDrawOptions}
+          onClose={() => setObjectPropsEntity(null)}
+        />,
+        document.body,
+      )}
+    </>
   )
 }

@@ -85,6 +85,62 @@ export function constraintSatisfied(data, c) {
       )
       return d <= PT_TOL * 8
     }
+    if (a.kind === 'point' && b.kind === 'circle') {
+      const p = m.get(a.id)
+      const c = data.circles?.find((x) => x.id === b.id)
+      if (!p || !c) return false
+      const rc = circleWithResolvedCenter(c, m)
+      if (rc.r < 1e-9) return false
+      const d = Math.abs(Math.hypot(p.x - rc.cx, p.y - rc.cy) - rc.r)
+      return d <= PT_TOL * 8
+    }
+    if (a.kind === 'circle' && b.kind === 'point') {
+      const p = m.get(b.id)
+      const c = data.circles?.find((x) => x.id === a.id)
+      if (!p || !c) return false
+      const rc = circleWithResolvedCenter(c, m)
+      if (rc.r < 1e-9) return false
+      const d = Math.abs(Math.hypot(p.x - rc.cx, p.y - rc.cy) - rc.r)
+      return d <= PT_TOL * 8
+    }
+    if (a.kind === 'point' && b.kind === 'arc') {
+      const p = m.get(a.id)
+      const arc = data.arcs?.find((x) => x.id === b.id)
+      if (!p || !arc) return false
+      const C = m.get(arc.centerId)
+      const A = m.get(arc.startId)
+      if (!C || !A) return false
+      const r = Math.hypot(A.x - C.x, A.y - C.y)
+      let bestD = (p.x - A.x) ** 2 + (p.y - A.y) ** 2
+      for (let i = 0; i <= 32; i++) {
+        const u = i / 32
+        const ang = arc.a0 + u * arc.sweep
+        const x = C.x + r * Math.cos(ang)
+        const y = C.y + r * Math.sin(ang)
+        const d = (p.x - x) ** 2 + (p.y - y) ** 2
+        if (d < bestD) bestD = d
+      }
+      return Math.sqrt(bestD) <= PT_TOL * 8
+    }
+    if (a.kind === 'arc' && b.kind === 'point') {
+      const p = m.get(b.id)
+      const arc = data.arcs?.find((x) => x.id === a.id)
+      if (!p || !arc) return false
+      const C = m.get(arc.centerId)
+      const A = m.get(arc.startId)
+      if (!C || !A) return false
+      const r = Math.hypot(A.x - C.x, A.y - C.y)
+      let bestD = (p.x - A.x) ** 2 + (p.y - A.y) ** 2
+      for (let i = 0; i <= 32; i++) {
+        const u = i / 32
+        const ang = arc.a0 + u * arc.sweep
+        const x = C.x + r * Math.cos(ang)
+        const y = C.y + r * Math.sin(ang)
+        const d = (p.x - x) ** 2 + (p.y - y) ** 2
+        if (d < bestD) bestD = d
+      }
+      return Math.sqrt(bestD) <= PT_TOL * 8
+    }
     return true
   }
 
@@ -421,8 +477,8 @@ function sameConstraintTargets(a, b) {
     if (
       a.type === 'coincident' &&
       t.length === 2 &&
-      t[0].kind === 'segment' &&
-      t[1].kind === 'point'
+      t[1].kind === 'point' &&
+      t[0].kind !== 'point'
     ) {
       return [t[1], t[0]]
     }

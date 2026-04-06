@@ -13,6 +13,10 @@ import {
   splineVertexRole,
 } from './splineMath.js'
 import { drawConstraintDecorations } from './constraintDraw.js'
+import {
+  canonicalFaceKey,
+  computeSegmentFaceRings,
+} from './segmentPlanarFaces.js'
 import { linearDistanceAnchorPoints } from './dimensionGeometry.js'
 import {
   DEFAULT_DOCUMENT_UNITS,
@@ -472,6 +476,15 @@ function drawPolarSpokeLabels(
   }
 }
 
+/** World mm → canvas CSS px (same as drawWorkspaceScene transform stack). */
+function worldToCanvasCss(wx, wy, pan, zoom) {
+  const z = zoom || 1
+  return { x: wx * z + pan.x, y: wy * z + pan.y }
+}
+
+/**
+ * Axes and tick marks in **device-independent CSS pixels** so stroke width stays ~1–2px at any zoom.
+ */
 function drawAxes(
   ctx,
   ox,
@@ -485,9 +498,10 @@ function drawAxes(
   pal,
   viewportWidth,
   gridMode,
+  pan,
+  dpr,
 ) {
   const z = zoom || 1
-  const lw = Math.max(2, 2 / z)
   const unit = labelOpts?.worldUnit ?? 'mm'
   const docUnits = labelOpts?.documentUnits
   const showTicks = labelOpts?.showAxisTickValues !== false
@@ -497,20 +511,33 @@ function drawAxes(
   const skipCartesianTicks =
     gridMode === 'polar' && tickFmt === 'radians_pi'
 
+  const axisLinePx = 1.75
+  const tickLinePx = 1.25
+  const tickHalfLen = 4
+
+  const toC = (wx, wy) => worldToCanvasCss(wx, wy, pan, z)
+
   ctx.save()
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.strokeStyle = pal.axisStroke
-  ctx.lineWidth = lw
+  ctx.lineWidth = axisLinePx
+  ctx.lineCap = 'square'
+
+  const v0 = toC(ox, minWY)
+  const v1 = toC(ox, maxWY)
   ctx.beginPath()
-  ctx.moveTo(ox, minWY)
-  ctx.lineTo(ox, maxWY)
+  ctx.moveTo(v0.x, v0.y)
+  ctx.lineTo(v1.x, v1.y)
   ctx.stroke()
+
+  const h0 = toC(minWX, oy)
+  const h1 = toC(maxWX, oy)
   ctx.beginPath()
-  ctx.moveTo(minWX, oy)
-  ctx.lineTo(maxWX, oy)
+  ctx.moveTo(h0.x, h0.y)
+  ctx.lineTo(h1.x, h1.y)
   ctx.stroke()
 
   if (showTicks && !skipCartesianTicks) {
-    const tick = 5 / z
     const col = pal.tickStroke
     const spanX = maxWX - minWX
     const spanY = maxWY - minWY
@@ -520,57 +547,51 @@ function drawAxes(
         ? pickRadiansTickStep(0, span, vw, z)
         : pickDecimalTickStep(0, span, vw)
 
+    ctx.lineWidth = tickLinePx
     let x0 = Math.ceil(minWX / step) * step
     for (let x = x0; x <= maxWX; x += step) {
       if (Math.abs(x - ox) < 1e-9 * Math.max(1, Math.abs(step))) continue
-      ctx.beginPath()
+      const c = toC(x, oy)
       ctx.strokeStyle = col
-      ctx.lineWidth = Math.max(0.5, 1 / z)
-      ctx.moveTo(x, oy - tick)
-      ctx.lineTo(x, oy + tick)
+      ctx.beginPath()
+      ctx.moveTo(c.x, c.y - tickHalfLen)
+      ctx.lineTo(c.x, c.y + tickHalfLen)
       ctx.stroke()
       const lx = cartesianTickLabel(x, step, tickFmt, docUnits)
-      drawWorldText(ctx, x, oy, z, lx, {
-        dy: 14,
-        font: '11px Inter, system-ui, sans-serif',
-        color: pal.tickText,
-        align: 'center',
-        baseline: 'top',
-      })
+      ctx.fillStyle = pal.tickText
+      ctx.font = '11px Inter, system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillText(lx, c.x, c.y + tickHalfLen + 2)
     }
     let y0 = Math.ceil(minWY / step) * step
     for (let y = y0; y <= maxWY; y += step) {
       if (Math.abs(y - oy) < 1e-9 * Math.max(1, Math.abs(step))) continue
-      ctx.beginPath()
+      const c = toC(ox, y)
       ctx.strokeStyle = col
-      ctx.lineWidth = Math.max(0.5, 1 / z)
-      ctx.moveTo(ox - tick, y)
-      ctx.lineTo(ox + tick, y)
+      ctx.beginPath()
+      ctx.moveTo(c.x - tickHalfLen, c.y)
+      ctx.lineTo(c.x + tickHalfLen, c.y)
       ctx.stroke()
       const ly = cartesianTickLabel(y, step, tickFmt, docUnits)
-      drawWorldText(ctx, ox, y, z, ly, {
-        dx: 14,
-        font: '11px Inter, system-ui, sans-serif',
-        color: pal.tickText,
-        align: 'left',
-        baseline: 'middle',
-      })
+      ctx.fillStyle = pal.tickText
+      ctx.font = '11px Inter, system-ui, sans-serif'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(ly, c.x + tickHalfLen + 3, c.y)
     }
   }
 
   if (showNames) {
-    drawWorldText(ctx, maxWX - 14 / z, oy + 4 / z, z, `x (${unit})`, {
-      font: '11px Inter, system-ui, sans-serif',
-      color: pal.axisLetter,
-      align: 'right',
-      baseline: 'top',
-    })
-    drawWorldText(ctx, ox + 4 / z, minWY + 14 / z, z, `y (${unit})`, {
-      font: '11px Inter, system-ui, sans-serif',
-      color: pal.axisLetter,
-      align: 'left',
-      baseline: 'top',
-    })
+    const xLabelPos = toC(maxWX, oy)
+    const yLabelPos = toC(ox, minWY)
+    ctx.fillStyle = pal.axisLetter
+    ctx.font = '11px Inter, system-ui, sans-serif'
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'top'
+    ctx.fillText(`x (${unit})`, xLabelPos.x - 6, xLabelPos.y + 4)
+    ctx.textAlign = 'left'
+    ctx.fillText(`y (${unit})`, yLabelPos.x + 4, yLabelPos.y + 6)
   }
   ctx.restore()
 }
@@ -724,6 +745,8 @@ export function drawWorkspaceScene(ctx, p) {
       pal,
       width,
       gridMode,
+      pan,
+      dpr,
     )
   }
 
@@ -781,6 +804,31 @@ export function drawWorkspaceScene(ctx, p) {
   const resolvedCircles = circles.map((c) =>
     circleWithResolvedCenter(c, pointById),
   )
+
+  if (fillRegions) {
+    const filledPolyKeys = new Set()
+    for (const poly of polygons) {
+      if (poly.fill && (poly.vertexIds?.length ?? 0) >= 3) {
+        filledPolyKeys.add(canonicalFaceKey(poly.vertexIds))
+      }
+    }
+    const segRings = computeSegmentFaceRings(points, segments)
+    ctx.fillStyle = pal.closedRegionFill
+    for (const ring of segRings) {
+      if (filledPolyKeys.has(canonicalFaceKey(ring))) continue
+      const v0 = pointById.get(ring[0])
+      if (!v0) continue
+      ctx.beginPath()
+      ctx.moveTo(v0.x, v0.y)
+      for (let i = 1; i < ring.length; i++) {
+        const v = pointById.get(ring[i])
+        if (!v) continue
+        ctx.lineTo(v.x, v.y)
+      }
+      ctx.closePath()
+      ctx.fill()
+    }
+  }
 
   for (const poly of polygons) {
     if (poly.vertexIds.length < 2) continue

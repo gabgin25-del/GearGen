@@ -132,6 +132,18 @@ export function relationTargetsFromSelection(type, selection, data) {
           { kind: 'segment', id: segs[0].id },
         ]
       }
+      if (pts.length >= 1 && circs.length >= 1) {
+        return [
+          { kind: 'point', id: pts[0].id },
+          { kind: 'circle', id: circs[0].id },
+        ]
+      }
+      if (pts.length >= 1 && arcs.length >= 1) {
+        return [
+          { kind: 'point', id: pts[0].id },
+          { kind: 'arc', id: arcs[0].id },
+        ]
+      }
       if (pts.length >= 2) {
         return [
           { kind: 'point', id: pts[0].id },

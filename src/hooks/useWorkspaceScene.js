@@ -41,6 +41,7 @@ export const TOOL = {
   SPLINE: 'spline',
   SELECT: 'select',
   DIMENSION: 'dimension',
+  TRIM: 'trim',
   SHAPE_RECT: 'shapeRect',
   SHAPE_TRI: 'shapeTri',
   SHAPE_NGON: 'shapeNgon',
@@ -79,7 +80,8 @@ export const RELATION_TYPE_OPTIONS = [
   {
     id: 'coincident',
     label: 'Coincident',
-    description: 'Point on point, or point lying on a line/segment.',
+    description:
+      'Point on point, point on line/segment, point on circle, or point on arc.',
   },
   {
     id: 'collinear',

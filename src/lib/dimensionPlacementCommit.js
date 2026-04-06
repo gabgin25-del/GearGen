@@ -61,7 +61,8 @@ export function completeDrivingDimensionPlacement(o) {
 
   if (pl.dimType === 'distance' && pl.ax != null) {
     const dk = pl.distanceKind
-    const smart = dk === 'pointPoint' || dk === 'segment'
+    const smart =
+      dk === 'pointPoint' || dk === 'segment' || dk === 'pointLine'
     const proj = smart
       ? classifyLinearDimensionProjection(
           wx,

@@ -32,6 +32,7 @@ const TOOL_LABEL = {
   [TOOL.ANGLE]: 'Angle',
   [TOOL.POLYGON]: 'Polygon',
   [TOOL.SPLINE]: 'Spline',
+  [TOOL.TRIM]: 'Trim',
   [TOOL.SHAPE_RECT]: 'Rectangle',
   [TOOL.SHAPE_TRI]: 'Triangle',
   [TOOL.SHAPE_NGON]: 'Regular n-gon',
