@@ -11,6 +11,7 @@ import { inferDistanceKind } from '../dimensionGeometry.js'
  */
 function workspaceRequiresLegacySolver(data) {
   for (const c of data.constraints ?? []) {
+    if (c.type === 'midPoint') return true
     if (c.type === 'similar' || c.type === 'symmetric') return true
     if (c.type === 'tangent') {
       const t = c.targets ?? []

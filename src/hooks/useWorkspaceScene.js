@@ -34,6 +34,7 @@ export const TOOL = {
   FREEHAND: 'freehand',
   POINT: 'point',
   SEGMENT: 'segment',
+  CENTER_LINE: 'centerLine',
   CIRCLE: 'circle',
   ARC: 'arc',
   ANGLE: 'angle',

@@ -905,11 +905,18 @@ export function drawWorkspaceScene(ctx, p) {
       seg.id,
       'segment',
     )
+    if (seg.construction) {
+      const dash = Math.max(3.5 / z, 1.2)
+      ctx.setLineDash([dash * 1.7, dash * 1.15])
+    } else {
+      ctx.setLineDash([])
+    }
     ctx.beginPath()
     ctx.moveTo(a.x, a.y)
     ctx.lineTo(b.x, b.y)
     ctx.stroke()
   }
+  ctx.setLineDash([])
 
   const selKey = new Set(
     sketchSelection.map((s) => `${s.kind}:${s.id}`),
@@ -928,11 +935,18 @@ export function drawWorkspaceScene(ctx, p) {
       const a = pointById.get(seg.a)
       const b = pointById.get(seg.b)
       if (!a || !b) continue
+      if (seg.construction) {
+        const dash = Math.max(3.5 / z, 1.2)
+        ctx.setLineDash([dash * 1.7, dash * 1.15])
+      } else {
+        ctx.setLineDash([])
+      }
       ctx.beginPath()
       ctx.moveTo(a.x, a.y)
       ctx.lineTo(b.x, b.y)
       ctx.stroke()
     }
+    ctx.setLineDash([])
     for (const c of resolvedCircles) {
       if (!sketchSel('circle', c.id)) continue
       ctx.beginPath()

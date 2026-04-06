@@ -136,6 +136,30 @@ export function incidentResidualsAndJacobian(data, pointId, x, y) {
       J.push([aby, -abx])
       continue
     }
+
+    if (
+      co.type === 'midPoint' &&
+      t.length === 2 &&
+      t[0].kind === 'point' &&
+      t[1].kind === 'segment' &&
+      t[0].id === pointId
+    ) {
+      const seg = data.segments.find((s) => s.id === t[1].id)
+      if (!seg) continue
+      const pa = xyOf(seg.a)
+      const pb = xyOf(seg.b)
+      const abx = pb.x - pa.x
+      const aby = pb.y - pa.y
+      const apx = x - pa.x
+      const apy = y - pa.y
+      r.push(apx * aby - apy * abx)
+      J.push([aby, -abx])
+      const bpx = x - pb.x
+      const bpy = y - pb.y
+      r.push(apx * apx + apy * apy - (bpx * bpx + bpy * bpy))
+      J.push([2 * (apx - bpx), 2 * (apy - bpy)])
+      continue
+    }
   }
 
   return { r, J }

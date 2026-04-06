@@ -43,6 +43,7 @@ import {
 import { circleWithResolvedCenter } from '../../lib/circleResolve.js'
 import {
   classifyLinearDimensionProjection,
+  distanceDimNeedsOrientationPhase,
   linearDimensionOffsetForProjection,
   linearDistanceValueForProjection,
 } from '../../lib/dimensionGeometry.js'
@@ -133,9 +134,18 @@ function tryCommitForSketchPlacement(d, co) {
   return { ok: false }
 }
 
-/** Ruler-style cursor for dimension tool (fallback: crosshair). */
+/** Ruler cursor: outer dark + inner light stroke for contrast on light/dark grids. */
 const DIMENSION_CURSOR =
-  'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2394a3b8\' stroke-width=\'1.5\' stroke-linecap=\'round\'%3E%3Cpath d=\'M5 19L19 5M7 15l2-2m2-2 2-2m2-2 2-2\'/%3E%3C/svg%3E") 2 20, crosshair'
+  'url("data:image/svg+xml,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" fill="none">' +
+      '<path d="M5 23L23 5" stroke="#0f172a" stroke-width="4" stroke-linecap="round"/>' +
+      '<path d="M5 23L23 5" stroke="#f8fafc" stroke-width="2" stroke-linecap="round"/>' +
+      '<path d="M7.5 18.5l2.2-2.2m2.4-2.4 2.2-2.2m2.4-2.4 2.2-2.2" stroke="#0f172a" stroke-width="2.2" stroke-linecap="round"/>' +
+      '<path d="M7.5 18.5l2.2-2.2m2.4-2.4 2.2-2.2m2.4-2.4 2.2-2.2" stroke="#38bdf8" stroke-width="1" stroke-linecap="round"/>' +
+      '</svg>',
+  ) +
+  '") 4 22, crosshair'
 
 const SNAP_PX = 10
 /** Canvas pixels: below this, marquee counts as a click (clear / no-op), not a box. */
@@ -1525,9 +1535,12 @@ export function WorkspaceCanvas({
         return
       }
 
-      if (t === TOOL.SEGMENT) {
+      if (t === TOOL.SEGMENT || t === TOOL.CENTER_LINE) {
+        const isCenterLine = t === TOOL.CENTER_LINE
         const draft = geomDraftRef.current
-        const first = !draft || draft.kind !== 'segment'
+        const first =
+          !draft ||
+          (draft.kind !== 'segment' && draft.kind !== 'centerLine')
 
         if (first) {
           const r = resolvePlacementWithSketchGuides(
@@ -1578,7 +1591,12 @@ export function WorkspaceCanvas({
             ax = fx
             ay = fy
           }
-          patchDraft({ kind: 'segment', fromId: pid, ax, ay })
+          patchDraft({
+            kind: isCenterLine ? 'centerLine' : 'segment',
+            fromId: pid,
+            ax,
+            ay,
+          })
           setPreview({
             kind: 'segment',
             ax,
@@ -1589,16 +1607,56 @@ export function WorkspaceCanvas({
           return
         }
 
+        const lineIsCenter = draft.kind === 'centerLine'
+
         const near = findNearbyPoint(pts, lx, ly, p, opt.zoom, SNAP_PX)
         if (near) {
           if (near.id === draft.fromId) return
-          commit((d) => ({
-            ...d,
-            segments: [
-              ...d.segments,
-              { id: nextId('l'), a: draft.fromId, b: near.id },
-            ],
-          }))
+          if (lineIsCenter) {
+            const midId = nextId('p')
+            const lid = nextId('l')
+            commit((d) => {
+              const pmap = new Map(d.points.map((q) => [q.id, q]))
+              const pa = pmap.get(draft.fromId)
+              const pb = pmap.get(near.id)
+              if (!pa || !pb) return d
+              const mx = (pa.x + pb.x) / 2
+              const my = (pa.y + pb.y) / 2
+              return {
+                ...d,
+                points: [...d.points, { id: midId, x: mx, y: my }],
+                segments: [
+                  ...d.segments,
+                  {
+                    id: lid,
+                    a: draft.fromId,
+                    b: near.id,
+                    construction: true,
+                    geoRegistered: true,
+                  },
+                ],
+                constraints: [
+                  ...(d.constraints ?? []),
+                  {
+                    id: nextId('co'),
+                    type: 'midPoint',
+                    targets: [
+                      { kind: 'point', id: midId },
+                      { kind: 'segment', id: lid },
+                    ],
+                  },
+                ],
+              }
+            })
+          } else {
+            commit((d) => ({
+              ...d,
+              segments: [
+                ...d.segments,
+                { id: nextId('l'), a: draft.fromId, b: near.id },
+              ],
+            }))
+          }
           patchDraft(null)
           setPreview(null)
           return
@@ -1642,12 +1700,47 @@ export function WorkspaceCanvas({
         }
         const endPid = nextId('p')
         const lid = nextId('l')
+        const midId = lineIsCenter ? nextId('p') : null
         const axisO = opt.axisOrigin ?? { x: 0, y: 0 }
         commit((d) => {
+          let pointsOut = [...d.points, { id: endPid, x: fx, y: fy }]
+          if (lineIsCenter && midId) {
+            const pmap = new Map(pointsOut.map((q) => [q.id, q]))
+            const pa = pmap.get(draft.fromId)
+            const pb = pmap.get(endPid)
+            if (!pa || !pb) return d
+            const mx = (pa.x + pb.x) / 2
+            const my = (pa.y + pb.y) / 2
+            pointsOut = [...pointsOut, { id: midId, x: mx, y: my }]
+          }
           let next = {
             ...d,
-            points: [...d.points, { id: endPid, x: fx, y: fy }],
-            segments: [...d.segments, { id: lid, a: draft.fromId, b: endPid }],
+            points: pointsOut,
+            segments: [
+              ...d.segments,
+              lineIsCenter
+                ? {
+                    id: lid,
+                    a: draft.fromId,
+                    b: endPid,
+                    construction: true,
+                    geoRegistered: true,
+                  }
+                : { id: lid, a: draft.fromId, b: endPid },
+            ],
+          }
+          if (lineIsCenter && midId) {
+            next.constraints = [
+              ...(next.constraints ?? []),
+              {
+                id: nextId('co'),
+                type: 'midPoint',
+                targets: [
+                  { kind: 'point', id: midId },
+                  { kind: 'segment', id: lid },
+                ],
+              },
+            ]
           }
           next = applyPlacementAutoConstraints(
             next,
@@ -1776,6 +1869,11 @@ export function WorkspaceCanvas({
           })
         }
 
+        if (dstate?.phase === 'orient' && dstate.pl) {
+          runDimPlacement(dstate.pl)
+          return
+        }
+
         if (dstate?.phase === 'pick2') {
           const e2 = pickDimensionEntity(wx, wy, ws, opt.zoom)
           if (!e2) return
@@ -1802,7 +1900,7 @@ export function WorkspaceCanvas({
               dimPlacementRef.current = null
               return
             }
-            runDimPlacement({
+            const plDraft = {
               dimType: 'distance',
               distanceKind: 'segment',
               targets: [seg.id],
@@ -1811,13 +1909,22 @@ export function WorkspaceCanvas({
               ay: pa.y,
               bx: pb.x,
               by: pb.y,
-            })
+            }
+            if (distanceDimNeedsOrientationPhase(plDraft)) {
+              dimPlacementRef.current = { phase: 'orient', pl: plDraft }
+              return
+            }
+            runDimPlacement(plDraft)
             return
           }
           const resolved = resolveDimensionFromTwoPicks(p1, e2, ws)
           if (!resolved) {
             dimPlacementRef.current = null
             setPreview(null)
+            return
+          }
+          if (distanceDimNeedsOrientationPhase(resolved)) {
+            dimPlacementRef.current = { phase: 'orient', pl: resolved }
             return
           }
           runDimPlacement(resolved)
@@ -2300,8 +2407,8 @@ export function WorkspaceCanvas({
                 A.y,
                 B.x,
                 B.y,
-                B.x,
-                B.y,
+                r.x,
+                r.y,
               )
               if (!params) return d
               return {
@@ -2977,9 +3084,12 @@ export function WorkspaceCanvas({
 
       if (!d && toolRef.current === TOOL.DIMENSION) {
         const pl = dimPlacementRef.current
-        if (pl?.phase === 'pick2' && pl.pick1) {
-          const wx = (lx - p.x) / opt.zoom
-          const wy = (ly - p.y) / opt.zoom
+        const wx = (lx - p.x) / opt.zoom
+        const wy = (ly - p.y) / opt.zoom
+        let pv = null
+        if (pl?.phase === 'orient' && pl.pl) {
+          pv = pl.pl
+        } else if (pl?.phase === 'pick2' && pl.pick1) {
           const eHover = pickDimensionEntity(
             wx,
             wy,
@@ -2999,7 +3109,9 @@ export function WorkspaceCanvas({
             setPreview(null)
             return
           }
-          const pv = resolved
+          pv = resolved
+        }
+        if (pv) {
           const ldo = labelDrawOptionsRef.current
           const du = ldo?.documentUnits ?? DEFAULT_DOCUMENT_UNITS
           const unit = ldo?.worldUnit ?? 'mm'
@@ -3081,7 +3193,7 @@ export function WorkspaceCanvas({
         }
       }
 
-      if (draft?.kind === 'segment') {
+      if (draft?.kind === 'segment' || draft?.kind === 'centerLine') {
         const near = findNearbyPoint(pts, lx, ly, p, opt.zoom, SNAP_PX)
         let bx
         let by
@@ -3734,6 +3846,29 @@ export function WorkspaceCanvas({
           x={sketchContextMenu.x}
           y={sketchContextMenu.y}
           theme={theme}
+          segmentConstruction={
+            sketchContextMenu.entity?.kind === 'segment'
+              ? !!workspaceSnapshot.segments?.find(
+                  (s) => s.id === sketchContextMenu.entity.id,
+                )?.construction
+              : false
+          }
+          onToggleConstruction={
+            sketchContextMenu.entity?.kind === 'segment'
+              ? () => {
+                  const sid = sketchContextMenu.entity.id
+                  commit((d) => ({
+                    ...d,
+                    segments: d.segments.map((s) =>
+                      s.id === sid
+                        ? { ...s, construction: !s.construction }
+                        : s,
+                    ),
+                  }))
+                  setSketchContextMenu(null)
+                }
+              : undefined
+          }
           onClose={() => setSketchContextMenu(null)}
           onObjectProperties={() => {
             setObjectPropsEntity(sketchContextMenu.entity)

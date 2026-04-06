@@ -229,6 +229,20 @@ export function applyConstraintEnforcement(data, constraint) {
   }
 
   if (
+    t === 'midPoint' &&
+    targets.length === 2 &&
+    targets[0].kind === 'point' &&
+    targets[1].kind === 'segment'
+  ) {
+    const pid = targets[0].id
+    const ep = segEndpoints(data, targets[1].id)
+    if (!ep) return recomputeBoundArcs(data)
+    const mx = (ep.pa.x + ep.pb.x) / 2
+    const my = (ep.pa.y + ep.pb.y) / 2
+    return recomputeBoundArcs(movePoint(data, pid, mx, my))
+  }
+
+  if (
     t === 'anchorAt' &&
     targets.length === 1 &&
     targets[0].kind === 'point' &&

@@ -1,5 +1,6 @@
 import {
   Activity,
+  AlignCenter,
   ChevronDown,
   ChevronRight,
   CircleDot,
@@ -40,6 +41,12 @@ const sketchTools = [
 
 const curveTools = [
   { id: TOOL.SEGMENT, label: 'Segment', icon: Minus },
+  {
+    id: TOOL.CENTER_LINE,
+    label:
+      'Center line — construction segment with locked midpoint for symmetry',
+    icon: AlignCenter,
+  },
   {
     id: TOOL.ARC,
     label: 'Arc — center, 3-point, or tangent (chips when active)',

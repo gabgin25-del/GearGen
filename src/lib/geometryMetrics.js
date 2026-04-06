@@ -122,7 +122,29 @@ export function arcSweepCenterFromCursor(
     while (d <= -Math.PI) d += 2 * Math.PI
     return Math.abs(d)
   }
-  const sweep = midDist(minor) <= midDist(major) ? minor : major
+  const twoPi = 2 * Math.PI
+  const bases = [minor, major]
+  const candidates = []
+  const seen = new Set()
+  for (const b of bases) {
+    for (let k = -1; k <= 1; k++) {
+      const s = b + k * twoPi
+      if (Math.abs(s) > twoPi + 1e-9 || Math.abs(s) < 1e-4) continue
+      const key = Math.round(s * 1e6)
+      if (seen.has(key)) continue
+      seen.add(key)
+      candidates.push(s)
+    }
+  }
+  let sweep = minor
+  let bestD = Infinity
+  for (const s of candidates) {
+    const d = midDist(s)
+    if (d < bestD) {
+      bestD = d
+      sweep = s
+    }
+  }
   if (Math.abs(sweep) < 1e-4) return null
   return { cx, cy, r, a0, sweep }
 }

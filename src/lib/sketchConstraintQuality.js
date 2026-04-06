@@ -165,6 +165,29 @@ export function constraintSatisfied(data, c) {
   }
 
   if (
+    t === 'midPoint' &&
+    targets.length === 2 &&
+    targets[0].kind === 'point' &&
+    targets[1].kind === 'segment'
+  ) {
+    const p = ptMap(data).get(targets[0].id)
+    const ep = segEndpoints(data, targets[1].id)
+    if (!p || !ep) return false
+    const mx = (ep.pa.x + ep.pb.x) / 2
+    const my = (ep.pa.y + ep.pb.y) / 2
+    if (Math.hypot(p.x - mx, p.y - my) > PT_TOL * 8) return false
+    const d = distPointToSegment(
+      p.x,
+      p.y,
+      ep.pa.x,
+      ep.pa.y,
+      ep.pb.x,
+      ep.pb.y,
+    )
+    return d <= PT_TOL * 8
+  }
+
+  if (
     t === 'anchorAt' &&
     targets.length === 1 &&
     targets[0].kind === 'point' &&

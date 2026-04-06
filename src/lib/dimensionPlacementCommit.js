@@ -11,7 +11,8 @@ import {
 
 /**
  * Commit a driving dimension from placement draft and open the value editor.
- * Used for dimension tool: single-step placement (no extra "placement" click).
+ * Smart linear dims: orientation is chosen by cursor on the placement click
+ * (after a prior orient-preview phase in the canvas).
  *
  * @param {{
  *   pl: object

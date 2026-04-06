@@ -27,6 +27,7 @@ const TOOL_LABEL = {
   [TOOL.FREEHAND]: 'Freehand',
   [TOOL.POINT]: 'Point',
   [TOOL.SEGMENT]: 'Segment',
+  [TOOL.CENTER_LINE]: 'Center line',
   [TOOL.CIRCLE]: 'Circle',
   [TOOL.ARC]: 'Arc',
   [TOOL.ANGLE]: 'Angle',

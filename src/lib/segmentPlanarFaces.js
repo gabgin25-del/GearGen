@@ -105,6 +105,7 @@ export function computeSegmentFaceRings(points, segments) {
   const pmap = new Map((points ?? []).map((p) => [p.id, p]))
   const adj = new Map()
   for (const s of segments ?? []) {
+    if (s.construction) continue
     if (!pmap.has(s.a) || !pmap.has(s.b)) continue
     if (!adj.has(s.a)) adj.set(s.a, [])
     if (!adj.has(s.b)) adj.set(s.b, [])
@@ -119,6 +120,7 @@ export function computeSegmentFaceRings(points, segments) {
   const out = []
 
   for (const s of segments ?? []) {
+    if (s.construction) continue
     if (!pmap.has(s.a) || !pmap.has(s.b)) continue
     for (const [u, v] of [
       [s.a, s.b],

@@ -128,6 +128,13 @@ export function linearDimensionOffsetFromCursor(wx, wy, ax, ay, bx, by) {
  * motion → vertical (ΔY) dimension; large vertical motion → horizontal (ΔX) dimension.
  * @param {'aligned' | 'horizontal' | 'vertical'} [fallback]
  */
+/** Linear distance kinds that use cursor-driven H/V/aligned before placement. */
+export function distanceDimNeedsOrientationPhase(pl) {
+  if (!pl || pl.dimType !== 'distance' || pl.ax == null) return false
+  const dk = pl.distanceKind
+  return dk === 'pointPoint' || dk === 'segment' || dk === 'pointLine'
+}
+
 export function classifyLinearDimensionProjection(
   wx,
   wy,

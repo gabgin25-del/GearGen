@@ -62,6 +62,7 @@ function describeEntity(data, entity, docUnits) {
         },
         { k: 'Endpoint A', v: s.a },
         { k: 'Endpoint B', v: s.b },
+        { k: 'Construction', v: s.construction ? 'Yes' : 'No' },
       ],
     }
   }
@@ -290,13 +291,27 @@ export function ObjectPropertiesModal({
  *   onObjectProperties: () => void
  *   onClose: () => void
  *   theme?: 'light' | 'dark'
+ *   segmentConstruction?: boolean
+ *   onToggleConstruction?: () => void
  * }} props
  */
-export function SketchContextMenu({ x, y, onObjectProperties, onClose, theme }) {
+export function SketchContextMenu({
+  x,
+  y,
+  onObjectProperties,
+  onClose,
+  theme,
+  segmentConstruction,
+  onToggleConstruction,
+}) {
   const panel =
     theme === 'light'
       ? 'border border-neutral-300 bg-white text-neutral-900 shadow-lg'
       : 'border border-gg-border bg-gg-workspace text-gg-text shadow-lg'
+  const item =
+    theme === 'light'
+      ? 'hover:bg-neutral-100'
+      : 'hover:bg-white/10'
   return (
     <div
       data-sketch-context-menu
@@ -307,7 +322,7 @@ export function SketchContextMenu({ x, y, onObjectProperties, onClose, theme }) 
       <button
         type="button"
         role="menuitem"
-        className="block w-full px-3 py-2 text-left text-[13px] hover:bg-white/10"
+        className={`block w-full px-3 py-2 text-left text-[13px] ${item}`}
         onClick={() => {
           onObjectProperties()
           onClose()
@@ -315,6 +330,20 @@ export function SketchContextMenu({ x, y, onObjectProperties, onClose, theme }) 
       >
         Object properties…
       </button>
+      {onToggleConstruction ? (
+        <button
+          type="button"
+          role="menuitem"
+          className={`block w-full px-3 py-2 text-left text-[13px] ${item}`}
+          onClick={() => {
+            onToggleConstruction()
+          }}
+        >
+          {segmentConstruction
+            ? 'Use as solid geometry'
+            : 'Construction geometry'}
+        </button>
+      ) : null}
     </div>
   )
 }
