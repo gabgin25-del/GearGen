@@ -57,14 +57,6 @@ export function buildPlaneGcsPrimitives(data) {
   const dimensions = data.dimensions ?? []
 
   const pmap = new Map(points.map((p) => [p.id, p]))
-  const fixedPoint = new Set()
-
-  for (const c of constraints) {
-    const t = c.targets ?? []
-    if (c.type === 'fixOrigin' && t[0]?.kind === 'point') {
-      fixedPoint.add(t[0].id)
-    }
-  }
 
   /** @type {object[]} */
   const out = []
@@ -95,13 +87,12 @@ export function buildPlaneGcsPrimitives(data) {
   }
 
   for (const p of points) {
-    const fixed = fixedPoint.has(p.id)
     out.push({
       id: p.id,
       type: 'point',
       x: p.x,
       y: p.y,
-      fixed,
+      fixed: false,
     })
   }
 
@@ -141,8 +132,18 @@ export function buildPlaneGcsPrimitives(data) {
     if (!C || !A || !B) continue
     const r = Math.hypot(A.x - C.x, A.y - C.y)
     if (r < 1e-9) continue
-    const start_angle = Math.atan2(A.y - C.y, A.x - C.x)
-    const end_angle = Math.atan2(B.y - C.y, B.x - C.x)
+    const start_angle =
+      a.a0 != null && Number.isFinite(a.a0)
+        ? a.a0
+        : Math.atan2(A.y - C.y, A.x - C.x)
+    let sweep = a.sweep
+    if (sweep == null || !Number.isFinite(sweep)) {
+      const te = Math.atan2(B.y - C.y, B.x - C.x)
+      sweep = te - start_angle
+      while (sweep <= -Math.PI) sweep += 2 * Math.PI
+      while (sweep > Math.PI) sweep -= 2 * Math.PI
+    }
+    const end_angle = start_angle + sweep
     out.push({
       id: arcPrimitiveId(a.id),
       type: 'arc',
@@ -500,11 +501,22 @@ export function buildPlaneGcsPrimitives(data) {
       t[0].kind === 'circle' &&
       t[1].kind === 'circle'
     ) {
+      const c0 = circles.find((x) => x.id === t[0].id)
+      const c1 = circles.find((x) => x.id === t[1].id)
+      if (!c0 || !c1) continue
+      const r0 = circleWithResolvedCenter(c0, pmap).r
+      const r1 = circleWithResolvedCenter(c1, pmap).r
+      const internal = c.circleTangentMode === 'internal'
+      const distVal = internal ? Math.abs(r0 - r1) : r0 + r1
+      const pname = `tanc2c_${nextCid('d')}`
+      out.push({ type: 'param', name: pname, value: distVal })
       out.push({
-        id: nextCid('tan_cc'),
-        type: 'tangent_cc',
+        id: nextCid('c2ct'),
+        type: 'c2cdistance',
         c1_id: circlePrimitiveId(t[0].id),
         c2_id: circlePrimitiveId(t[1].id),
+        dist: pname,
+        driving: true,
       })
       continue
     }

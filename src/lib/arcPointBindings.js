@@ -27,6 +27,15 @@ export function recomputeBoundArcs(data) {
       if (!C || !A || !B) return a
       const r = Math.hypot(A.x - C.x, A.y - C.y)
       if (r < 1e-6) return a
+      const midAng =
+        a.a0 != null &&
+        a.sweep != null &&
+        Number.isFinite(a.a0) &&
+        Number.isFinite(a.sweep)
+          ? a.a0 + a.sweep / 2
+          : Math.atan2(B.y - C.y, B.x - C.x)
+      const mpx = C.x + r * Math.cos(midAng)
+      const mpy = C.y + r * Math.sin(midAng)
       const prm = arcSweepCenterFromCursor(
         C.x,
         C.y,
@@ -35,8 +44,8 @@ export function recomputeBoundArcs(data) {
         A.y,
         B.x,
         B.y,
-        B.x,
-        B.y,
+        mpx,
+        mpy,
       )
       return prm ? { ...a, ...prm } : a
     }

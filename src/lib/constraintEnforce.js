@@ -69,6 +69,59 @@ function segEndpoints(data, segId) {
   return { seg, pa, pb }
 }
 
+/** Segment id if `pid` is the dependent point of a midPoint constraint. */
+function midPointSegmentForPoint(data, pid) {
+  for (const c of data.constraints ?? []) {
+    if (c.type !== 'midPoint') continue
+    const t = c.targets ?? []
+    if (t.length !== 2) continue
+    if (t[0].kind === 'point' && t[0].id === pid && t[1].kind === 'segment') {
+      return t[1].id
+    }
+    if (t[1].kind === 'point' && t[1].id === pid && t[0].kind === 'segment') {
+      return t[0].id
+    }
+  }
+  return null
+}
+
+/** Point id constrained as midpoint of `segId`, if any. */
+function midPointPointForSegment(data, segId) {
+  for (const c of data.constraints ?? []) {
+    if (c.type !== 'midPoint') continue
+    const t = c.targets ?? []
+    if (t.length !== 2) continue
+    if (t[1].kind === 'segment' && t[1].id === segId && t[0].kind === 'point') {
+      return t[0].id
+    }
+    if (t[0].kind === 'segment' && t[0].id === segId && t[1].kind === 'point') {
+      return t[1].id
+    }
+  }
+  return null
+}
+
+/** Translate segment endpoints and sync the linked midPoint sketch point, if present. */
+function translateSegmentEndpointsIncludingMid(data, segId, dx, dy) {
+  const ep = segEndpoints(data, segId)
+  if (!ep) return data
+  let d = movePoint(data, ep.seg.a, ep.pa.x + dx, ep.pa.y + dy)
+  d = movePoint(d, ep.seg.b, ep.pb.x + dx, ep.pb.y + dy)
+  const mpid = midPointPointForSegment(d, segId)
+  if (mpid) {
+    const ep2 = segEndpoints(d, segId)
+    if (ep2) {
+      d = movePoint(
+        d,
+        mpid,
+        (ep2.pa.x + ep2.pb.x) / 2,
+        (ep2.pa.y + ep2.pb.y) / 2,
+      )
+    }
+  }
+  return d
+}
+
 function len(ax, ay, bx, by) {
   return Math.hypot(bx - ax, by - ay)
 }
@@ -290,7 +343,17 @@ export function applyConstraintEnforcement(data, constraint) {
       const pid = targets[i].id
       const p = d.points.find((q) => q.id === pid)
       if (!p) continue
-      d = movePoint(d, pid, p.x, y0)
+      const segId = midPointSegmentForPoint(d, pid)
+      if (segId) {
+        const ep = segEndpoints(d, segId)
+        if (ep) {
+          const my = (ep.pa.y + ep.pb.y) / 2
+          const dy = y0 - my
+          d = translateSegmentEndpointsIncludingMid(d, segId, 0, dy)
+        }
+      } else {
+        d = movePoint(d, pid, p.x, y0)
+      }
     }
     return recomputeBoundArcs(d)
   }
@@ -303,7 +366,17 @@ export function applyConstraintEnforcement(data, constraint) {
       const pid = targets[i].id
       const p = d.points.find((q) => q.id === pid)
       if (!p) continue
-      d = movePoint(d, pid, x0, p.y)
+      const segId = midPointSegmentForPoint(d, pid)
+      if (segId) {
+        const ep = segEndpoints(d, segId)
+        if (ep) {
+          const mx = (ep.pa.x + ep.pb.x) / 2
+          const dx = x0 - mx
+          d = translateSegmentEndpointsIncludingMid(d, segId, dx, 0)
+        }
+      } else {
+        d = movePoint(d, pid, x0, p.y)
+      }
     }
     return recomputeBoundArcs(d)
   }
