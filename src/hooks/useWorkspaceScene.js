@@ -22,6 +22,7 @@ import {
   geometryFromSketchPayload,
   workspaceHasDrawableContent,
 } from '../lib/sketchPayload.js'
+import { applyAllPendingCuts } from '../lib/sketchBooleanCut.js'
 import { deleteSketchEntities } from '../lib/sketchDelete.js'
 import {
   cloneWorkspaceData,
@@ -398,6 +399,16 @@ export function useWorkspaceScene(options = {}) {
     [shapeFillHex],
   )
 
+  const executePendingCuts = useCallback(() => {
+    const fill = shapeFillRgba ?? 'rgba(59, 130, 246, 0.22)'
+    commit((d) => {
+      const next = applyAllPendingCuts(d, nextId, {
+        defaultPolygonFill: fill,
+      })
+      return next ?? d
+    })
+  }, [commit, nextId, shapeFillRgba])
+
   const placementOptions = useMemo(
     () => ({
       snapToGrid,
@@ -656,11 +667,6 @@ export function useWorkspaceScene(options = {}) {
       ) {
         return
       }
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        e.preventDefault()
-        deleteSelectedSketch()
-        return
-      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         if (e.shiftKey) redo()
@@ -674,7 +680,7 @@ export function useWorkspaceScene(options = {}) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo, deleteSelectedSketch])
+  }, [undo, redo])
 
   return {
     tool,
@@ -707,6 +713,7 @@ export function useWorkspaceScene(options = {}) {
     splines: data.splines ?? [],
     constraints: data.constraints ?? [],
     dimensions: data.dimensions ?? [],
+    pendingCuts: data.pendingCuts ?? [],
     setDrivingDimensionValue,
     commit,
     checkpoint,
@@ -715,6 +722,7 @@ export function useWorkspaceScene(options = {}) {
     redo,
     clear,
     deleteSelectedSketch,
+    executePendingCuts,
     canUndo,
     canRedo,
     geomDraft,

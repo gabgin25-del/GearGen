@@ -310,6 +310,7 @@ export function AppShell() {
           splines={scene.splines}
           constraints={scene.constraints}
           dimensions={scene.dimensions}
+          pendingCuts={scene.pendingCuts}
           arcMode={scene.arcMode}
           splineType={scene.splineType}
           splineTension={scene.splineTension}
@@ -341,6 +342,8 @@ export function AppShell() {
           setTool={scene.setTool}
           setDrivingDimensionValue={scene.setDrivingDimensionValue}
           cutMode={scene.cutMode}
+          deleteSelectedSketch={scene.deleteSelectedSketch}
+          executePendingCuts={scene.executePendingCuts}
           allowRegionFill={scene.allowRegionFill}
           sketchLockState={scene.sketchLockState}
           theme={theme}

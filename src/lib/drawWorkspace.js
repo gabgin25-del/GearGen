@@ -434,6 +434,62 @@ function drawPolarGrid(
   }
 }
 
+function gcd(a, b) {
+  let x = Math.abs(a)
+  let y = Math.abs(b)
+  while (y) {
+    const t = y
+    y = x % y
+    x = t
+  }
+  return x || 1
+}
+
+/** Spoke index k → label "0", "π/6", … "11π/6" (radians, π/6 steps). */
+function polarRadianSpokeLabel(k) {
+  if (k === 0) return '0'
+  if (k === 6) return 'π'
+  if (k === 3) return 'π/2'
+  if (k === 9) return '3π/2'
+  const g = gcd(k, 6)
+  const n = k / g
+  const d = 6 / g
+  if (d === 1) return `${n}π`
+  return `${n}π/${d}`
+}
+
+function drawPendingCuts(ctx, pendingCuts, z) {
+  const list = pendingCuts ?? []
+  if (!list.length) return
+  const zz = z || 1
+  ctx.save()
+  ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'
+  ctx.strokeStyle = 'rgba(220, 38, 38, 0.65)'
+  ctx.lineWidth = Math.max(0.5, 1 / zz)
+  for (const c of list) {
+    if (c.kind === 'circle' && Number.isFinite(c.cx) && Number.isFinite(c.cy) && Number.isFinite(c.r) && c.r > 0) {
+      ctx.beginPath()
+      ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.stroke()
+    } else if (
+      c.kind === 'rect' &&
+      Number.isFinite(c.minx) &&
+      Number.isFinite(c.miny) &&
+      Number.isFinite(c.maxx) &&
+      Number.isFinite(c.maxy)
+    ) {
+      const w = c.maxx - c.minx
+      const h = c.maxy - c.miny
+      if (w > 0 && h > 0) {
+        ctx.fillRect(c.minx, c.miny, w, h)
+        ctx.strokeRect(c.minx, c.miny, w, h)
+      }
+    }
+  }
+  ctx.restore()
+}
+
 function drawPolarSpokeLabels(
   ctx,
   ox,
@@ -454,15 +510,13 @@ function drawPolarSpokeLabels(
   if (maxR < 3 / z) return
   const pad = 14 / z
   const labelR = Math.max(maxR * 0.88, maxR - pad)
-  /** Degree labels every 30° on outer ring (0° … 330°). */
   const labelStep = Math.PI / 6
   const fontPx = Math.max(10, Math.min(13, 11 * Math.sqrt(z)))
   for (let k = 0; k < 12; k++) {
     const a = k * labelStep
     const lx = ox + Math.cos(a) * labelR
     const ly = oy + Math.sin(a) * labelR
-    const deg = (k * 30) % 360
-    const text = `${deg}°`
+    const text = polarRadianSpokeLabel(k)
     ctx.save()
     ctx.translate(lx, ly)
     ctx.rotate(a + Math.PI / 2)
@@ -618,6 +672,7 @@ function drawAxes(
  *   arcs?: { id: string; cx: number; cy: number; r: number; a0: number; sweep: number; fill?: string | null }[]
  *   angles?: { id: string; centerId: string; arm1Id: string; arm2Id: string }[]
  *   splines?: { id: string; vertexIds: string[]; splineType: string; tension?: number; closed?: boolean; segmentsPerSpan?: number; fill?: string | null }[]
+ *   pendingCuts?: { kind: string; cx?: number; cy?: number; r?: number; minx?: number; miny?: number; maxx?: number; maxy?: number }[]
  *   preview: null | object
  *   selectedPointId?: string | null
  *   hoverHighlight?: null | { kind: string; id: string }
@@ -654,6 +709,7 @@ export function drawWorkspaceScene(ctx, p) {
     arcs = [],
     angles = [],
     splines = [],
+    pendingCuts = [],
     preview,
     selectedPointId,
     hoverHighlight = null,
@@ -762,6 +818,7 @@ export function drawWorkspaceScene(ctx, p) {
     snapGuideHighlight,
     pal,
   )
+  drawPendingCuts(ctx, pendingCuts, z)
   if (
     gridMode === 'polar' &&
     labelDrawOptions.showAxisTickValues !== false

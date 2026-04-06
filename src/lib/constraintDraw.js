@@ -125,6 +125,39 @@ function drawConstraintBadge(ctx, z, wx, wy, type, serial, pal) {
 }
 
 /**
+ * ANSI-style right-angle marker: small square in the corner, edges parallel to the two segments.
+ * @param {{ x: number; y: number }} I intersection (world)
+ * @param {{ ux: number; uy: number }} u0 first segment unit direction
+ * @param {{ ux: number; uy: number }} u1 second segment unit direction
+ */
+function drawPerpendicularCornerBox(ctx, z, I, u0, u1, pal) {
+  let u0x = u0.ux
+  let u0y = u0.uy
+  let u1x = u1.ux
+  let u1y = u1.uy
+  const cross = u0x * u1y - u0y * u1x
+  if (cross < 0) {
+    u1x = -u1x
+    u1y = -u1y
+  }
+  const L = 12 / (z || 1)
+  const lw = Math.max(1.15, 2 / (z || 1))
+  ctx.save()
+  ctx.lineWidth = lw
+  ctx.strokeStyle = pal.relationStroke
+  ctx.fillStyle = pal.relationFill
+  ctx.beginPath()
+  ctx.moveTo(I.x, I.y)
+  ctx.lineTo(I.x + u0x * L, I.y + u0y * L)
+  ctx.lineTo(I.x + u0x * L + u1x * L, I.y + u0y * L + u1y * L)
+  ctx.lineTo(I.x + u1x * L, I.y + u1y * L)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  ctx.restore()
+}
+
+/**
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} z zoom
  * @param {{
@@ -221,7 +254,7 @@ export function drawConstraintDecorations(ctx, z, p, pal) {
         g1.pb.y,
       )
       if (!I) continue
-      drawConstraintBadge(ctx, z, I.x, I.y, co.type, serial, pal)
+      drawPerpendicularCornerBox(ctx, z, I, g0, g1, pal)
       continue
     }
 

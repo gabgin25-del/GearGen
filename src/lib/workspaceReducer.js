@@ -11,6 +11,7 @@ export const emptyWorkspaceData = () => ({
   splines: [],
   constraints: [],
   dimensions: [],
+  pendingCuts: [],
 })
 
 export function cloneWorkspaceData(data) {
@@ -51,6 +52,7 @@ export function cloneWorkspaceData(data) {
           : t,
       ),
     })),
+    pendingCuts: (data.pendingCuts ?? []).map((c) => ({ ...c })),
     solverDiagnostics: data.solverDiagnostics
       ? { ...data.solverDiagnostics }
       : undefined,

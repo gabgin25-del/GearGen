@@ -47,6 +47,48 @@ export function distPointToSegment(px, py, ax, ay, bx, by) {
  * @param {Map<string, { x: number; y: number }>} pointById
  * @param {number} tolWorld
  */
+/** Filled interior only (no boundary). */
+export function hitPolygonInterior(wx, wy, poly, pointById) {
+  const verts = poly.vertexIds.map((id) => pointById.get(id)).filter(Boolean)
+  return verts.length >= 3 && pointInPolygon(wx, wy, verts)
+}
+
+/**
+ * If the cursor is on a polygon edge, return the matching segment id when possible
+ * (boundarySegmentIds or endpoint lookup in `segments`).
+ * @param {{ id: string; a: string; b: string }[]} segments
+ * @returns {string | null}
+ */
+export function hitPolygonBoundarySegmentId(
+  wx,
+  wy,
+  poly,
+  segments,
+  pointById,
+  tolWorld,
+) {
+  const vids = poly.vertexIds ?? []
+  if (vids.length < 2) return null
+  const bids = poly.boundarySegmentIds
+  for (let i = 0; i < vids.length; i++) {
+    const a = vids[i]
+    const b = vids[(i + 1) % vids.length]
+    const pa = pointById.get(a)
+    const pb = pointById.get(b)
+    if (!pa || !pb) continue
+    if (distPointToSegment(wx, wy, pa.x, pa.y, pb.x, pb.y) > tolWorld) continue
+    if (bids?.length > i && bids[i]) {
+      const seg = segments.find((s) => s.id === bids[i])
+      if (seg) return seg.id
+    }
+    const seg = segments.find(
+      (s) => (s.a === a && s.b === b) || (s.a === b && s.b === a),
+    )
+    return seg ? seg.id : null
+  }
+  return null
+}
+
 export function hitPolygon(wx, wy, poly, pointById, tolWorld) {
   const verts = poly.vertexIds.map((id) => pointById.get(id)).filter(Boolean)
   if (verts.length < 2) return false
@@ -57,8 +99,7 @@ export function hitPolygon(wx, wy, poly, pointById, tolWorld) {
       return true
     }
   }
-  if (verts.length >= 3 && pointInPolygon(wx, wy, verts)) return true
-  return false
+  return hitPolygonInterior(wx, wy, poly, pointById)
 }
 
 /**

@@ -11,7 +11,6 @@ import { inferDistanceKind } from '../dimensionGeometry.js'
  */
 function workspaceRequiresLegacySolver(data) {
   for (const c of data.constraints ?? []) {
-    if (c.type === 'midPoint') return true
     if (c.type === 'similar' || c.type === 'symmetric') return true
     if (c.type === 'tangent') {
       const t = c.targets ?? []
@@ -107,16 +106,13 @@ export function buildPlaneGcsPrimitives(data) {
   }
 
   for (const circ of circles) {
-    const cpt =
-      circ.centerId && pmap.get(circ.centerId)
-        ? circ.centerId
-        : null
-    if (!cpt) continue
+    if (!circ.centerId || !pmap.has(circ.centerId)) continue
     const rc = circleWithResolvedCenter(circ, pmap)
+    if (!Number.isFinite(rc.r) || rc.r < 1e-12) continue
     out.push({
       id: circlePrimitiveId(circ.id),
       type: 'circle',
-      c_id: cpt,
+      c_id: circ.centerId,
       radius: rc.r,
     })
   }
@@ -177,6 +173,52 @@ export function buildPlaneGcsPrimitives(data) {
         p_id: pid,
         y: 0,
         scale: 1e6,
+      })
+      continue
+    }
+
+    if (c.type === 'midPoint' && t.length === 2) {
+      let midPid = null
+      let seg = null
+      if (t[0].kind === 'point' && t[1].kind === 'segment') {
+        midPid = t[0].id
+        seg = segments.find((s) => s.id === t[1].id)
+      } else if (t[1].kind === 'point' && t[0].kind === 'segment') {
+        midPid = t[1].id
+        seg = segments.find((s) => s.id === t[0].id)
+      }
+      if (!midPid || !seg || !pmap.has(seg.a) || !pmap.has(seg.b) || !pmap.has(midPid)) {
+        continue
+      }
+      const pa = pmap.get(seg.a)
+      const pb = pmap.get(seg.b)
+      if (!pa || !pb) continue
+      const chord = Math.hypot(pb.x - pa.x, pb.y - pa.y)
+      const seed = Math.max(1e-6, chord * 0.5)
+      const pname = `mid_${nextCid('d')}`
+      out.push({ type: 'param', name: pname, value: seed })
+      out.push({
+        id: nextCid('mpon'),
+        type: 'point_on_line_ppp',
+        p_id: midPid,
+        lp1_id: seg.a,
+        lp2_id: seg.b,
+      })
+      out.push({
+        id: nextCid('mda'),
+        type: 'p2p_distance',
+        p1_id: seg.a,
+        p2_id: midPid,
+        distance: pname,
+        driving: true,
+      })
+      out.push({
+        id: nextCid('mdb'),
+        type: 'p2p_distance',
+        p1_id: midPid,
+        p2_id: seg.b,
+        distance: pname,
+        driving: true,
       })
       continue
     }

@@ -36,7 +36,8 @@ import {
   hitArc,
   hitCircle,
   hitPolylineSamples,
-  hitPolygon,
+  hitPolygonBoundarySegmentId,
+  hitPolygonInterior,
   hitSegment,
   pointInPolygon,
 } from '../../lib/hitTest.js'
@@ -78,10 +79,6 @@ import { ARC_MODE, TOOL } from '../../hooks/useWorkspaceScene.js'
 import { useElementSize } from '../../hooks/useElementSize.js'
 import Draggable from 'react-draggable'
 import { completeDrivingDimensionPlacement } from '../../lib/dimensionPlacementCommit.js'
-import {
-  trySubtractCircleFromFill,
-  trySubtractRectFromFill,
-} from '../../lib/sketchBooleanCut.js'
 import { trimSegmentAtClick } from '../../lib/sketchTrim.js'
 import { radialLeaderGeometry } from '../../lib/DimensionRenderer.js'
 import {
@@ -134,18 +131,18 @@ function tryCommitForSketchPlacement(d, co) {
   return { ok: false }
 }
 
-/** Ruler cursor: outer dark + inner light stroke for contrast on light/dark grids. */
+/** Lucide `ruler` icon as cursor (dual stroke for contrast on light/dark grids). */
 const DIMENSION_CURSOR =
   'url("data:image/svg+xml,' +
   encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" fill="none">' +
-      '<path d="M5 23L23 5" stroke="#0f172a" stroke-width="4" stroke-linecap="round"/>' +
-      '<path d="M5 23L23 5" stroke="#f8fafc" stroke-width="2" stroke-linecap="round"/>' +
-      '<path d="M7.5 18.5l2.2-2.2m2.4-2.4 2.2-2.2m2.4-2.4 2.2-2.2" stroke="#0f172a" stroke-width="2.2" stroke-linecap="round"/>' +
-      '<path d="M7.5 18.5l2.2-2.2m2.4-2.4 2.2-2.2m2.4-2.4 2.2-2.2" stroke="#38bdf8" stroke-width="1" stroke-linecap="round"/>' +
+    '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none">' +
+      '<path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 7.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 7.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z" stroke="#f8fafc" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="m14.5 12.5 2-2m3-3 2-2M3 11l9-9" stroke="#0f172a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="m14.5 12.5 2-2m3-3 2-2M3 11l9-9" stroke="#38bdf8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>' +
       '</svg>',
   ) +
-  '") 4 22, crosshair'
+  '") 3 19, crosshair'
 
 const SNAP_PX = 10
 /** Canvas pixels: below this, marquee counts as a click (clear / no-op), not a box. */
@@ -378,7 +375,16 @@ function pickShapeAtWorld(wx, wy, data, tolWorld) {
   }
   for (let i = data.polygons.length - 1; i >= 0; i--) {
     const poly = data.polygons[i]
-    if (hitPolygon(wx, wy, poly, pointById, tolWorld))
+    const boundarySeg = hitPolygonBoundarySegmentId(
+      wx,
+      wy,
+      poly,
+      data.segments,
+      pointById,
+      tolWorld,
+    )
+    if (boundarySeg) return { kind: 'segment', id: boundarySeg }
+    if (hitPolygonInterior(wx, wy, poly, pointById))
       return { kind: 'polygon', id: poly.id }
   }
   const angles = data.angles ?? []
@@ -453,6 +459,7 @@ export function WorkspaceCanvas({
   splines,
   constraints = [],
   dimensions = [],
+  pendingCuts = [],
   arcMode,
   splineType,
   splineTension,
@@ -487,6 +494,8 @@ export function WorkspaceCanvas({
   theme = 'dark',
   setDrivingDimensionValue,
   cutMode = false,
+  deleteSelectedSketch,
+  executePendingCuts,
 }) {
   const cutModeRef = useRef(cutMode)
   useEffect(() => {
@@ -582,6 +591,7 @@ export function WorkspaceCanvas({
   const splineSegmentsPerSpanRef = useRef(splineSegmentsPerSpan)
   const autoFillClosedSplineLoopsRef = useRef(autoFillClosedSplineLoops)
   const presetNgonSidesRef = useRef(presetNgonSides)
+  const deleteSelectedSketchRef = useRef(deleteSelectedSketch)
 
   const workspaceRef = useRef({
     points,
@@ -593,6 +603,7 @@ export function WorkspaceCanvas({
     splines,
     constraints,
     dimensions,
+    pendingCuts,
   })
   const selectedShapeRef = useRef(selectedShape)
   const setSelectedShapeRef = useRef(setSelectedShape)
@@ -675,6 +686,10 @@ export function WorkspaceCanvas({
   useEffect(() => {
     setDrivingDimRef.current = setDrivingDimensionValue
   }, [setDrivingDimensionValue])
+
+  useEffect(() => {
+    deleteSelectedSketchRef.current = deleteSelectedSketch
+  }, [deleteSelectedSketch])
 
   useEffect(() => {
     dimEditRef.current = dimEdit
@@ -816,6 +831,7 @@ export function WorkspaceCanvas({
       splines,
       constraints,
       dimensions,
+      pendingCuts,
     }
   }, [
     points,
@@ -827,6 +843,7 @@ export function WorkspaceCanvas({
     splines,
     constraints,
     dimensions,
+    pendingCuts,
   ])
 
   const workspaceSnapshot = useMemo(
@@ -840,6 +857,7 @@ export function WorkspaceCanvas({
       splines,
       constraints,
       dimensions,
+      pendingCuts,
     }),
     [
       points,
@@ -851,6 +869,7 @@ export function WorkspaceCanvas({
       splines,
       constraints,
       dimensions,
+      pendingCuts,
     ],
   )
 
@@ -990,6 +1009,7 @@ export function WorkspaceCanvas({
       theme,
       sketchLockState,
       snapGuideHighlight,
+      pendingCuts,
     })
   }, [
     size.width,
@@ -1022,6 +1042,7 @@ export function WorkspaceCanvas({
     theme,
     sketchLockState,
     snapGuideHighlight,
+    pendingCuts,
   ])
 
   useEffect(() => {
@@ -1075,6 +1096,17 @@ export function WorkspaceCanvas({
         t instanceof HTMLTextAreaElement ||
         (t instanceof HTMLElement && t.isContentEditable)
       ) {
+        return
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const sel = sketchSelectionRef.current ?? []
+        const sh = selectedShapeRef.current
+        const canDelete =
+          sel.length > 0 || (sh?.kind && sh?.id)
+        if (canDelete && deleteSelectedSketchRef.current) {
+          e.preventDefault()
+          deleteSelectedSketchRef.current()
+        }
         return
       }
       if (e.key === 'Escape') {
@@ -1994,22 +2026,16 @@ export function WorkspaceCanvas({
           return
         }
         if (cutModeRef.current) {
-          const fill =
-            shapeStyleRef.current.shapeFillRgba ?? 'rgba(59, 130, 246, 0.22)'
-          const carved = trySubtractCircleFromFill(
-            workspaceRef.current,
-            draft.cx,
-            draft.cy,
-            rad,
-            nextId,
-            { defaultPolygonFill: fill },
-          )
-          if (carved) {
-            commit(() => carved)
-            patchDraft(null)
-            setPreview(null)
-            return
-          }
+          commit((d) => ({
+            ...d,
+            pendingCuts: [
+              ...(d.pendingCuts ?? []),
+              { kind: 'circle', cx: draft.cx, cy: draft.cy, r: rad },
+            ],
+          }))
+          patchDraft(null)
+          setPreview(null)
+          return
         }
         const fill = shapeStyleRef.current.fillNewShapes
           ? shapeStyleRef.current.shapeFillRgba
@@ -2064,19 +2090,15 @@ export function WorkspaceCanvas({
           return
         }
         if (cutModeRef.current) {
-          const fill =
-            shapeStyleRef.current.shapeFillRgba ?? 'rgba(59, 130, 246, 0.22)'
-          const carved = trySubtractRectFromFill(
-            workspaceRef.current,
-            { minx, miny, maxx, maxy },
-            nextId,
-            { defaultPolygonFill: fill },
-          )
-          if (carved) {
-            commit(() => carved)
-            patchDraft(null)
-            return
-          }
+          commit((d) => ({
+            ...d,
+            pendingCuts: [
+              ...(d.pendingCuts ?? []),
+              { kind: 'rect', minx, miny, maxx, maxy },
+            ],
+          }))
+          patchDraft(null)
+          return
         }
         const fill = shapeStyleRef.current.fillNewShapes
           ? shapeStyleRef.current.shapeFillRgba
@@ -3874,6 +3896,12 @@ export function WorkspaceCanvas({
             setObjectPropsEntity(sketchContextMenu.entity)
             setSketchContextMenu(null)
           }}
+          pendingCutsCount={(pendingCuts ?? []).length}
+          onCutBodies={
+            (pendingCuts ?? []).length > 0 && executePendingCuts
+              ? executePendingCuts
+              : undefined
+          }
         />,
         document.body,
       )}

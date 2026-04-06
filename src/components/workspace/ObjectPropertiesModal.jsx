@@ -293,6 +293,8 @@ export function ObjectPropertiesModal({
  *   theme?: 'light' | 'dark'
  *   segmentConstruction?: boolean
  *   onToggleConstruction?: () => void
+ *   pendingCutsCount?: number
+ *   onCutBodies?: () => void
  * }} props
  */
 export function SketchContextMenu({
@@ -303,6 +305,8 @@ export function SketchContextMenu({
   theme,
   segmentConstruction,
   onToggleConstruction,
+  pendingCutsCount = 0,
+  onCutBodies,
 }) {
   const panel =
     theme === 'light'
@@ -342,6 +346,19 @@ export function SketchContextMenu({
           {segmentConstruction
             ? 'Use as solid geometry'
             : 'Construction geometry'}
+        </button>
+      ) : null}
+      {pendingCutsCount > 0 && onCutBodies ? (
+        <button
+          type="button"
+          role="menuitem"
+          className={`block w-full px-3 py-2 text-left text-[13px] ${item}`}
+          onClick={() => {
+            onCutBodies()
+            onClose()
+          }}
+        >
+          Cut bodies ({pendingCutsCount})
         </button>
       ) : null}
     </div>

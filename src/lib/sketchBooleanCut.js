@@ -224,6 +224,31 @@ export function addRectangularHoleToPolygon(data, polyId, rect, nextId) {
  * Try to cut a circle-shaped void into a filled region; returns updated data or null.
  * @param {{ defaultPolygonFill?: string }} [opts]
  */
+/**
+ * Apply every queued cut (circle or axis-aligned rect) in order; clears `pendingCuts`.
+ * @returns {object | null} updated workspace, or null if there were no pending cuts
+ */
+export function applyAllPendingCuts(data, nextId, opts = {}) {
+  const cuts = data.pendingCuts ?? []
+  if (!cuts.length) return null
+  let d = data
+  for (const c of cuts) {
+    let n = null
+    if (c.kind === 'circle') {
+      n = trySubtractCircleFromFill(d, c.cx, c.cy, c.r, nextId, opts)
+    } else if (c.kind === 'rect') {
+      n = trySubtractRectFromFill(
+        d,
+        { minx: c.minx, miny: c.miny, maxx: c.maxx, maxy: c.maxy },
+        nextId,
+        opts,
+      )
+    }
+    if (n) d = n
+  }
+  return { ...d, pendingCuts: [] }
+}
+
 export function trySubtractCircleFromFill(data, cx, cy, r, nextId, opts = {}) {
   const defaultFill =
     opts.defaultPolygonFill ?? 'rgba(59, 130, 246, 0.22)'

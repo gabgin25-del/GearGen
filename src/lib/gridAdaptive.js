@@ -4,7 +4,6 @@
  */
 
 const TARGET_MINOR_PX = 26
-const MIN_MINOR_PX = 14
 
 /**
  * @param {number} minWX
@@ -26,7 +25,7 @@ export function pickAdaptiveCartesianSteps(
   const span = Math.max(maxWX - minWX, maxWY - minWY, 1)
   let minor = Math.max(4, baseMinor)
 
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 50; i++) {
     const px = minor * z
     if (px >= TARGET_MINOR_PX) break
     const next = minor * 2
@@ -34,11 +33,7 @@ export function pickAdaptiveCartesianSteps(
     minor = next
   }
 
-  const minorPx = minor * z
-  let minorAlpha = 1
-  if (minorPx < MIN_MINOR_PX * 0.85) minorAlpha = 0
-  else if (minorPx < MIN_MINOR_PX * 1.15) minorAlpha = 0.22
-  else if (minorPx < TARGET_MINOR_PX * 0.78) minorAlpha = 0.45
+  const minorAlpha = 1
 
   let major = minor * 5
   const majorPx = major * z
