@@ -5,6 +5,9 @@
 
 const TARGET_MINOR_PX = 26
 
+/** Max refinement iterations for adaptive grid step (“infinite zoom” cap). */
+export const ADAPTIVE_GRID_MAX_ITERATIONS = 50
+
 /**
  * @param {number} minWX
  * @param {number} maxWX
@@ -25,7 +28,7 @@ export function pickAdaptiveCartesianSteps(
   const span = Math.max(maxWX - minWX, maxWY - minWY, 1)
   let minor = Math.max(4, baseMinor)
 
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < ADAPTIVE_GRID_MAX_ITERATIONS; i++) {
     const px = minor * z
     if (px >= TARGET_MINOR_PX) break
     const next = minor * 2

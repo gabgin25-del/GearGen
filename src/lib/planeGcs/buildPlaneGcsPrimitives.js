@@ -1,6 +1,9 @@
 /**
  * Maps GearGen workspace → PlaneGCS sketch primitives (points, lines, circles, constraints).
  * Unsupported relations defer to the legacy solver (return null).
+ *
+ * Sketch flags such as `isCut` (cutter vs solid) are boolean/UI metadata for fills and
+ * booleans — they are not geometric degrees of freedom and are intentionally omitted here.
  */
 
 import { circleWithResolvedCenter } from '../circleResolve.js'
@@ -136,8 +139,13 @@ export function buildPlaneGcsPrimitives(data) {
     if (sweep == null || !Number.isFinite(sweep)) {
       const te = Math.atan2(B.y - C.y, B.x - C.x)
       sweep = te - start_angle
-      while (sweep <= -Math.PI) sweep += 2 * Math.PI
-      while (sweep > Math.PI) sweep -= 2 * Math.PI
+      while (sweep < 0) sweep += 2 * Math.PI
+      while (sweep >= 2 * Math.PI) sweep -= 2 * Math.PI
+    }
+    while (sweep < 0) sweep += 2 * Math.PI
+    while (sweep >= 2 * Math.PI) sweep -= 2 * Math.PI
+    if (a.forceMajor && sweep < Math.PI) {
+      sweep = 2 * Math.PI - sweep
     }
     const end_angle = start_angle + sweep
     out.push({

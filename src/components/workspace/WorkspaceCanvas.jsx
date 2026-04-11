@@ -79,6 +79,10 @@ import { ARC_MODE, TOOL } from '../../hooks/useWorkspaceScene.js'
 import { useElementSize } from '../../hooks/useElementSize.js'
 import Draggable from 'react-draggable'
 import { completeDrivingDimensionPlacement } from '../../lib/dimensionPlacementCommit.js'
+import {
+  trySubtractCircleFromFill,
+  trySubtractRectFromFill,
+} from '../../lib/sketchBooleanCut.js'
 import { trimSegmentAtClick } from '../../lib/sketchTrim.js'
 import { radialLeaderGeometry } from '../../lib/DimensionRenderer.js'
 import {
@@ -142,7 +146,7 @@ const DIMENSION_CURSOR =
       '<path d="m14.5 12.5 2-2m3-3 2-2M3 11l9-9" stroke="#38bdf8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>' +
       '</svg>',
   ) +
-  '") 3 19, crosshair'
+  '") 4 22, crosshair'
 
 const SNAP_PX = 10
 /** Canvas pixels: below this, marquee counts as a click (clear / no-op), not a box. */
@@ -423,6 +427,8 @@ function pickShapeAtWorld(wx, wy, data, tolWorld) {
 function pickSketchEntity(wx, wy, lx, ly, data, p, zoom, tolWorld) {
   const near = findNearbyPoint(data.points, lx, ly, p, zoom, SNAP_PX)
   if (near) return { kind: 'point', id: near.id }
+  const sh = pickShapeAtWorld(wx, wy, data, tolWorld)
+  if (sh) return sh
   const pointById = new Map(data.points.map((q) => [q.id, q]))
   const hit = findNearestSegmentHit(
     data.segments,
@@ -432,8 +438,7 @@ function pickSketchEntity(wx, wy, lx, ly, data, p, zoom, tolWorld) {
     tolWorld,
   )
   if (hit) return { kind: 'segment', id: hit.seg.id }
-  const sh = pickShapeAtWorld(wx, wy, data, tolWorld)
-  return sh ?? null
+  return null
 }
 
 export function WorkspaceCanvas({
@@ -459,7 +464,6 @@ export function WorkspaceCanvas({
   splines,
   constraints = [],
   dimensions = [],
-  pendingCuts = [],
   arcMode,
   splineType,
   splineTension,
@@ -495,7 +499,6 @@ export function WorkspaceCanvas({
   setDrivingDimensionValue,
   cutMode = false,
   deleteSelectedSketch,
-  executePendingCuts,
 }) {
   const cutModeRef = useRef(cutMode)
   useEffect(() => {
@@ -603,7 +606,6 @@ export function WorkspaceCanvas({
     splines,
     constraints,
     dimensions,
-    pendingCuts,
   })
   const selectedShapeRef = useRef(selectedShape)
   const setSelectedShapeRef = useRef(setSelectedShape)
@@ -759,7 +761,13 @@ export function WorkspaceCanvas({
         openKey: Date.now(),
       })
     },
-    [tool, setDrivingDimensionValue, drivingDimEditDraft, clampDimPopoverPosition],
+    [
+      tool,
+      setDrivingDimensionValue,
+      drivingDimEditDraft,
+      clampDimPopoverPosition,
+      containerRef,
+    ],
   )
 
   const commitDimEdit = useCallback(() => {
@@ -831,7 +839,6 @@ export function WorkspaceCanvas({
       splines,
       constraints,
       dimensions,
-      pendingCuts,
     }
   }, [
     points,
@@ -843,7 +850,6 @@ export function WorkspaceCanvas({
     splines,
     constraints,
     dimensions,
-    pendingCuts,
   ])
 
   const workspaceSnapshot = useMemo(
@@ -857,7 +863,6 @@ export function WorkspaceCanvas({
       splines,
       constraints,
       dimensions,
-      pendingCuts,
     }),
     [
       points,
@@ -869,7 +874,6 @@ export function WorkspaceCanvas({
       splines,
       constraints,
       dimensions,
-      pendingCuts,
     ],
   )
 
@@ -1009,7 +1013,6 @@ export function WorkspaceCanvas({
       theme,
       sketchLockState,
       snapGuideHighlight,
-      pendingCuts,
     })
   }, [
     size.width,
@@ -1042,7 +1045,6 @@ export function WorkspaceCanvas({
     theme,
     sketchLockState,
     snapGuideHighlight,
-    pendingCuts,
   ])
 
   useEffect(() => {
@@ -2025,18 +2027,6 @@ export function WorkspaceCanvas({
           setPreview(null)
           return
         }
-        if (cutModeRef.current) {
-          commit((d) => ({
-            ...d,
-            pendingCuts: [
-              ...(d.pendingCuts ?? []),
-              { kind: 'circle', cx: draft.cx, cy: draft.cy, r: rad },
-            ],
-          }))
-          patchDraft(null)
-          setPreview(null)
-          return
-        }
         const fill = shapeStyleRef.current.fillNewShapes
           ? shapeStyleRef.current.shapeFillRgba
           : null
@@ -2054,6 +2044,7 @@ export function WorkspaceCanvas({
               cy: draft.cy,
               r: rad,
               fill,
+              isCut: !!cutModeRef.current,
               geoRegistered: true,
             },
           ],
@@ -2086,17 +2077,6 @@ export function WorkspaceCanvas({
         const miny = Math.min(draft.y1, y2)
         const maxy = Math.max(draft.y1, y2)
         if (maxx - minx < 2 || maxy - miny < 2) {
-          patchDraft(null)
-          return
-        }
-        if (cutModeRef.current) {
-          commit((d) => ({
-            ...d,
-            pendingCuts: [
-              ...(d.pendingCuts ?? []),
-              { kind: 'rect', minx, miny, maxx, maxy },
-            ],
-          }))
           patchDraft(null)
           return
         }
@@ -2136,7 +2116,15 @@ export function WorkspaceCanvas({
             { kind: 'segment', id: s1 },
           ],
         }
-        const newConstraints = [coPar0, coPar1, coPerp]
+        const coPerpOpp = {
+          id: nextId('co'),
+          type: 'perpendicular',
+          targets: [
+            { kind: 'segment', id: s2 },
+            { kind: 'segment', id: s3 },
+          ],
+        }
+        const newConstraints = [coPar0, coPar1, coPerp, coPerpOpp]
         commit((d) => {
           let next = {
             ...d,
@@ -2160,6 +2148,7 @@ export function WorkspaceCanvas({
                 id: polyId,
                 vertexIds: [p1, p2, p3, p4],
                 fill,
+                isCut: !!cutModeRef.current,
                 geoRegistered: true,
                 outlineViaSegments: true,
                 boundarySegmentIds: [s0, s1, s2, s3],
@@ -2230,7 +2219,7 @@ export function WorkspaceCanvas({
             boundarySegmentIds.push(sid)
             newSegs.push({ id: sid, a, b, geoRegistered: true })
           }
-          return {
+          let next = {
             ...d,
             points: [...d.points, ...newPts],
             segments: [...d.segments, ...newSegs],
@@ -2240,12 +2229,27 @@ export function WorkspaceCanvas({
                 id: polyId,
                 vertexIds: newIds,
                 fill,
+                isCut: !!cutModeRef.current,
                 geoRegistered: true,
                 outlineViaSegments: true,
                 boundarySegmentIds,
               },
             ],
+            constraints: [...(d.constraints ?? [])],
           }
+          for (let i = 0; i < n - 1; i++) {
+            const c = {
+              id: nextId('co'),
+              type: 'equal',
+              targets: [
+                { kind: 'segment', id: boundarySegmentIds[i] },
+                { kind: 'segment', id: boundarySegmentIds[i + 1] },
+              ],
+            }
+            next = { ...next, constraints: [...next.constraints, c] }
+            next = applyConstraintEnforcement(next, c)
+          }
+          return recomputeBoundArcs(next)
         })
         patchDraft(null)
         return
@@ -2410,12 +2414,8 @@ export function WorkspaceCanvas({
             )
             if (!r) return
             commit((d) => {
-              let ptsOut = d.points
-              let eid = r.pointId
-              if (r.isNewPoint) {
-                eid = nextId('p')
-                ptsOut = [...d.points, { id: eid, x: r.x, y: r.y }]
-              }
+              const eid = nextId('p')
+              const ptsOut = [...d.points, { id: eid, x: r.x, y: r.y }]
               const pmap = new Map(ptsOut.map((q) => [q.id, q]))
               const C = pmap.get(draft.centerId)
               const A = pmap.get(draft.startId)
@@ -2689,6 +2689,7 @@ export function WorkspaceCanvas({
                   id: nextId('poly'),
                   vertexIds: [...draft.vertexIds],
                   fill,
+                  isCut: !!cutModeRef.current,
                   geoRegistered: true,
                 },
               ],
@@ -2854,11 +2855,10 @@ export function WorkspaceCanvas({
       toggleSketchSelectionItem,
       clearSketchSelection,
       paintMarqueeOverlay,
-      replaceSketchSelection,
-      unionSketchSelection,
       setDimEdit,
-      drivingDimEditDraft,
       clampDimPopoverPosition,
+      checkpoint,
+      containerRef,
     ],
   )
 
@@ -2868,7 +2868,6 @@ export function WorkspaceCanvas({
       if (!canvas) return
 
       const d = dragRef.current
-      const t = toolRef.current
       const p = panRef.current
       const opt = placementRef.current
 
@@ -3896,10 +3895,119 @@ export function WorkspaceCanvas({
             setObjectPropsEntity(sketchContextMenu.entity)
             setSketchContextMenu(null)
           }}
-          pendingCutsCount={(pendingCuts ?? []).length}
-          onCutBodies={
-            (pendingCuts ?? []).length > 0 && executePendingCuts
-              ? executePendingCuts
+          isCutShape={
+            sketchContextMenu.entity?.kind === 'circle'
+              ? !!workspaceSnapshot.circles?.find(
+                  (c) => c.id === sketchContextMenu.entity.id,
+                )?.isCut
+              : sketchContextMenu.entity?.kind === 'polygon'
+                ? !!workspaceSnapshot.polygons?.find(
+                    (pg) => pg.id === sketchContextMenu.entity.id,
+                  )?.isCut
+                : sketchContextMenu.entity?.kind === 'spline'
+                  ? !!workspaceSnapshot.splines?.find(
+                      (sp) => sp.id === sketchContextMenu.entity.id,
+                    )?.isCut
+                  : false
+          }
+          onToggleCutGeometry={
+            sketchContextMenu.entity?.kind === 'circle' ||
+            sketchContextMenu.entity?.kind === 'polygon' ||
+            sketchContextMenu.entity?.kind === 'spline'
+              ? () => {
+                  const e = sketchContextMenu.entity
+                  commit((d) => {
+                    if (e.kind === 'circle') {
+                      return {
+                        ...d,
+                        circles: d.circles.map((c) =>
+                          c.id === e.id ? { ...c, isCut: !c.isCut } : c,
+                        ),
+                      }
+                    }
+                    if (e.kind === 'polygon') {
+                      return {
+                        ...d,
+                        polygons: d.polygons.map((p) =>
+                          p.id === e.id ? { ...p, isCut: !p.isCut } : p,
+                        ),
+                      }
+                    }
+                    return {
+                      ...d,
+                      splines: (d.splines ?? []).map((s) =>
+                        s.id === e.id ? { ...s, isCut: !s.isCut } : s,
+                      ),
+                    }
+                  })
+                  setSketchContextMenu(null)
+                }
+              : undefined
+          }
+          onExecuteCut={
+            sketchContextMenu.entity?.kind === 'circle' ||
+            sketchContextMenu.entity?.kind === 'polygon' ||
+            sketchContextMenu.entity?.kind === 'spline'
+              ? () => {
+                  const e = sketchContextMenu.entity
+                  const fill =
+                    shapeStyleRef.current.shapeFillRgba ??
+                    'rgba(59, 130, 246, 0.22)'
+                  commit((d) => {
+                    if (e.kind === 'circle') {
+                      const c = d.circles.find((x) => x.id === e.id)
+                      if (!c?.isCut) return d
+                      const pmap = new Map((d.points ?? []).map((p) => [p.id, p]))
+                      const rc = circleWithResolvedCenter(c, pmap)
+                      const next = trySubtractCircleFromFill(
+                        d,
+                        rc.cx,
+                        rc.cy,
+                        rc.r,
+                        nextId,
+                        { defaultPolygonFill: fill },
+                      )
+                      if (!next) return d
+                      return {
+                        ...next,
+                        circles: (next.circles ?? []).filter((x) => x.id !== e.id),
+                      }
+                    }
+                    const pmap = new Map((d.points ?? []).map((p) => [p.id, p]))
+                    const poly = d.polygons.find((x) => x.id === e.id)
+                    const spl = (d.splines ?? []).find((x) => x.id === e.id)
+                    const verts = poly
+                      ? poly.vertexIds.map((id) => pmap.get(id)).filter(Boolean)
+                      : spl
+                        ? (spl.vertexIds ?? []).map((id) => pmap.get(id)).filter(Boolean)
+                        : []
+                    const isCut = poly?.isCut || spl?.isCut
+                    if (!isCut || verts.length < 3) return d
+                    let minx = Infinity
+                    let miny = Infinity
+                    let maxx = -Infinity
+                    let maxy = -Infinity
+                    for (const v of verts) {
+                      minx = Math.min(minx, v.x)
+                      miny = Math.min(miny, v.y)
+                      maxx = Math.max(maxx, v.x)
+                      maxy = Math.max(maxy, v.y)
+                    }
+                    const next = trySubtractRectFromFill(
+                      d,
+                      { minx, miny, maxx, maxy },
+                      nextId,
+                      { defaultPolygonFill: fill },
+                    )
+                    if (!next) return d
+                    return {
+                      ...next,
+                      polygons: (next.polygons ?? []).filter((x) => x.id !== e.id),
+                      splines: (next.splines ?? []).filter((x) => x.id !== e.id),
+                    }
+                  })
+                  setSketchContextMenu(null)
+                }
               : undefined
           }
         />,

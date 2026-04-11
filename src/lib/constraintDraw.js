@@ -135,8 +135,13 @@ function drawPerpendicularCornerBox(ctx, z, I, u0, u1, pal) {
   let u0y = u0.uy
   let u1x = u1.ux
   let u1y = u1.uy
-  const cross = u0x * u1y - u0y * u1x
-  if (cross < 0) {
+  const bisx = u0x + u1x
+  const bisy = u0y + u1y
+  if (u0x * bisx + u0y * bisy < 0) {
+    u0x = -u0x
+    u0y = -u0y
+  }
+  if (u1x * bisx + u1y * bisy < 0) {
     u1x = -u1x
     u1y = -u1y
   }

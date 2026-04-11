@@ -181,6 +181,5 @@ export function deleteSketchEntities(data, selection) {
     strokes,
     constraints,
     dimensions,
-    pendingCuts: data.pendingCuts ?? [],
   }
 }

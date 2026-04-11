@@ -5,17 +5,22 @@ import {
 
 export { arcSecantAndBulge } from './geometryMetrics.js'
 
-/** Whether angle tTest lies on arc from a0 with signed sweep in (-π, π] */
+/** Positive sweep in [0, 2π); collapses floating drift from angle arithmetic. */
+export function normalizeSweep0TwoPi(sweep) {
+  if (!Number.isFinite(sweep)) return 0
+  let s = sweep
+  const twoPi = 2 * Math.PI
+  while (s < 0) s += twoPi
+  while (s >= twoPi - 1e-14) s -= twoPi
+  return s
+}
+
+/** Whether angle tTest lies on arc from a0 with CCW sweep in [0, 2π]. */
 function onDirectedArc(a0, sweep, tTest) {
-  let dt = tTest - a0
-  while (dt <= -Math.PI) dt += 2 * Math.PI
-  while (dt > Math.PI) dt -= 2 * Math.PI
-  if (sweep >= 0) {
-    const u = dt < 0 ? dt + 2 * Math.PI : dt
-    return u >= -1e-4 && u <= sweep + 1e-4
-  }
-  const u = dt > 0 ? dt - 2 * Math.PI : dt
-  return u <= 1e-4 && u >= sweep - 1e-4
+  let u = tTest - a0
+  while (u < 0) u += 2 * Math.PI
+  while (u >= 2 * Math.PI) u -= 2 * Math.PI
+  return u >= -1e-4 && u <= sweep + 1e-4
 }
 
 /**
@@ -30,15 +35,13 @@ export function arcThroughThreePoints(x0, y0, x1, y1, x2, y2) {
   const t2 = Math.atan2(y2 - cy, x2 - cx)
 
   let sweep = t2 - t0
-  while (sweep <= -Math.PI) sweep += 2 * Math.PI
-  while (sweep > Math.PI) sweep -= 2 * Math.PI
+  while (sweep < 0) sweep += 2 * Math.PI
+  while (sweep >= 2 * Math.PI) sweep -= 2 * Math.PI
   if (onDirectedArc(t0, sweep, t1)) {
     return { cx, cy, r, a0: t0, sweep }
   }
 
-  sweep = t2 - t0
-  if (sweep > 0) sweep -= 2 * Math.PI
-  else sweep += 2 * Math.PI
+  sweep = 2 * Math.PI - sweep
   if (onDirectedArc(t0, sweep, t1)) {
     return { cx, cy, r, a0: t0, sweep }
   }

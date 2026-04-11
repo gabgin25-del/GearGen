@@ -458,38 +458,6 @@ function polarRadianSpokeLabel(k) {
   return `${n}π/${d}`
 }
 
-function drawPendingCuts(ctx, pendingCuts, z) {
-  const list = pendingCuts ?? []
-  if (!list.length) return
-  const zz = z || 1
-  ctx.save()
-  ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'
-  ctx.strokeStyle = 'rgba(220, 38, 38, 0.65)'
-  ctx.lineWidth = Math.max(0.5, 1 / zz)
-  for (const c of list) {
-    if (c.kind === 'circle' && Number.isFinite(c.cx) && Number.isFinite(c.cy) && Number.isFinite(c.r) && c.r > 0) {
-      ctx.beginPath()
-      ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.stroke()
-    } else if (
-      c.kind === 'rect' &&
-      Number.isFinite(c.minx) &&
-      Number.isFinite(c.miny) &&
-      Number.isFinite(c.maxx) &&
-      Number.isFinite(c.maxy)
-    ) {
-      const w = c.maxx - c.minx
-      const h = c.maxy - c.miny
-      if (w > 0 && h > 0) {
-        ctx.fillRect(c.minx, c.miny, w, h)
-        ctx.strokeRect(c.minx, c.miny, w, h)
-      }
-    }
-  }
-  ctx.restore()
-}
-
 function drawPolarSpokeLabels(
   ctx,
   ox,
@@ -671,8 +639,7 @@ function drawAxes(
  *   polygons: { id: string; vertexIds: string[]; fill?: string | null }[]
  *   arcs?: { id: string; cx: number; cy: number; r: number; a0: number; sweep: number; fill?: string | null }[]
  *   angles?: { id: string; centerId: string; arm1Id: string; arm2Id: string }[]
- *   splines?: { id: string; vertexIds: string[]; splineType: string; tension?: number; closed?: boolean; segmentsPerSpan?: number; fill?: string | null }[]
- *   pendingCuts?: { kind: string; cx?: number; cy?: number; r?: number; minx?: number; miny?: number; maxx?: number; maxy?: number }[]
+ *   splines?: { id: string; vertexIds: string[]; splineType: string; tension?: number; closed?: boolean; segmentsPerSpan?: number; fill?: string | null; isCut?: boolean }[]
  *   preview: null | object
  *   selectedPointId?: string | null
  *   hoverHighlight?: null | { kind: string; id: string }
@@ -709,7 +676,6 @@ export function drawWorkspaceScene(ctx, p) {
     arcs = [],
     angles = [],
     splines = [],
-    pendingCuts = [],
     preview,
     selectedPointId,
     hoverHighlight = null,
@@ -818,7 +784,6 @@ export function drawWorkspaceScene(ctx, p) {
     snapGuideHighlight,
     pal,
   )
-  drawPendingCuts(ctx, pendingCuts, z)
   if (
     gridMode === 'polar' &&
     labelDrawOptions.showAxisTickValues !== false
@@ -911,7 +876,9 @@ export function drawWorkspaceScene(ctx, p) {
       ctx.closePath()
     }
     if (poly.fill && fillRegions) {
-      ctx.fillStyle = pal.closedRegionFill
+      ctx.fillStyle = poly.isCut
+        ? 'rgba(239, 68, 68, 0.4)'
+        : pal.closedRegionFill
       ctx.fill('evenodd')
     }
   }
@@ -926,7 +893,9 @@ export function drawWorkspaceScene(ctx, p) {
           ctx.arc(h.cx, h.cy, h.r, 0, Math.PI * 2, true)
         }
       }
-      ctx.fillStyle = pal.closedRegionFill
+      ctx.fillStyle = c.isCut
+        ? 'rgba(239, 68, 68, 0.4)'
+        : pal.closedRegionFill
       ctx.fill('evenodd')
     }
   }
@@ -1257,12 +1226,13 @@ export function drawWorkspaceScene(ctx, p) {
         null,
         pal,
       ) ?? baseStroke
+    const polyStrokeBase = poly.isCut ? 'rgba(220, 38, 38, 0.95)' : polyBase
     ctx.strokeStyle = shapeStrokeStyle(
       hoverHighlight,
       selectedShape,
       poly.id,
       'polygon',
-      polyBase,
+      polyStrokeBase,
     )
     ctx.lineWidth = shapeLineWidth(
       lwGeom,
@@ -1271,6 +1241,8 @@ export function drawWorkspaceScene(ctx, p) {
       poly.id,
       'polygon',
     )
+    if (poly.isCut) ctx.setLineDash([5 / z, 5 / z])
+    else ctx.setLineDash([])
     ctx.beginPath()
     ctx.moveTo(first.x, first.y)
     for (let i = 1; i < poly.vertexIds.length; i++) {
@@ -1280,6 +1252,7 @@ export function drawWorkspaceScene(ctx, p) {
     }
     ctx.closePath()
     ctx.stroke()
+    ctx.setLineDash([])
   }
 
   for (const c of resolvedCircles) {
@@ -1295,12 +1268,13 @@ export function drawWorkspaceScene(ctx, p) {
         null,
         pal,
       ) ?? baseStroke
+    const circStrokeBase = orig?.isCut ? 'rgba(220, 38, 38, 0.95)' : circBase
     ctx.strokeStyle = shapeStrokeStyle(
       hoverHighlight,
       selectedShape,
       c.id,
       'circle',
-      circBase,
+      circStrokeBase,
     )
     ctx.lineWidth = shapeLineWidth(
       lwGeom,
@@ -1309,9 +1283,12 @@ export function drawWorkspaceScene(ctx, p) {
       c.id,
       'circle',
     )
+    if (orig?.isCut) ctx.setLineDash([5 / z, 5 / z])
+    else ctx.setLineDash([])
     ctx.beginPath()
     ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2)
     ctx.stroke()
+    ctx.setLineDash([])
   }
 
   for (const a of arcs) {
@@ -1362,7 +1339,9 @@ export function drawWorkspaceScene(ctx, p) {
         ctx.lineTo(samples[i].x, samples[i].y)
       }
       ctx.closePath()
-      ctx.fillStyle = pal.closedRegionFill
+      ctx.fillStyle = sp.isCut
+        ? 'rgba(239, 68, 68, 0.4)'
+        : pal.closedRegionFill
       ctx.fill()
     }
 
@@ -1394,12 +1373,13 @@ export function drawWorkspaceScene(ctx, p) {
         null,
         pal,
       ) ?? pal.splineStroke
+    const splStrokeBase = sp.isCut ? 'rgba(220, 38, 38, 0.95)' : splBase
     ctx.strokeStyle = shapeStrokeStyle(
       hoverHighlight,
       selectedShape,
       sp.id,
       'spline',
-      splBase,
+      splStrokeBase,
     )
     ctx.lineWidth = shapeLineWidth(
       splineLw,
@@ -1408,12 +1388,15 @@ export function drawWorkspaceScene(ctx, p) {
       sp.id,
       'spline',
     )
+    if (sp.isCut) ctx.setLineDash([5 / z, 5 / z])
+    else ctx.setLineDash([])
     ctx.beginPath()
     ctx.moveTo(samples[0].x, samples[0].y)
     for (let i = 1; i < samples.length; i++) {
       ctx.lineTo(samples[i].x, samples[i].y)
     }
     ctx.stroke()
+    ctx.setLineDash([])
   }
 
   const showAngleLabels = labelDrawOptions.showAngleDegrees !== false

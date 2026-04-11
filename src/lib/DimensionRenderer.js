@@ -1,9 +1,10 @@
 /**
- * ANSI-style dimension graphics (extension lines, 3:1 arrowheads, gap from geometry).
+ * ANSI Y14.5–style dimension graphics (extension lines, 3:1 arrowheads, gap from geometry).
  * World-space drawing; caller sets ctx transform (pan/zoom) already applied.
  *
  * Gap / overshoot per typical inch–metric lecture conversions (~1/16" ≈ 1.5 mm, ~1/8" ≈ 3 mm),
  * expressed in sketch world units (treat 1 unit ≈ 1 mm for readable prints).
+ * Horizontal dimensions use horizontal leader shoulders between extension and dimension line.
  */
 
 /** Visible gap from object to extension line start. */

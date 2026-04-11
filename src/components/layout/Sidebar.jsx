@@ -1,44 +1,36 @@
-import {
-  Box,
-  ClipboardList,
-  FileJson,
-  FolderOpen,
-  Layers,
-  Shapes,
-} from 'lucide-react'
-
-const NAV_IDS = {
-  gears: 'gears',
-  stacks: 'stacks',
-  projects: 'projects',
-  library: 'library',
-  registered: 'registered',
-  sketches: 'sketches',
-}
+import { FolderOpen, FunctionSquare, PenTool, Settings2 } from 'lucide-react'
+import { NAV_IDS } from './sidebarNav.js'
 
 const navItems = [
-  { id: NAV_IDS.gears, icon: Shapes, label: 'Gears' },
-  { id: NAV_IDS.stacks, icon: Layers, label: 'Stacks' },
-  { id: NAV_IDS.projects, icon: FolderOpen, label: 'Projects' },
-  { id: NAV_IDS.library, icon: Box, label: 'Library' },
-  { id: NAV_IDS.sketches, icon: FileJson, label: 'Sketches' },
-  { id: NAV_IDS.registered, icon: ClipboardList, label: 'Registered' },
+  { id: NAV_IDS.drawing, icon: PenTool, label: 'Drawing' },
+  { id: NAV_IDS.savedSketches, icon: FolderOpen, label: 'Saved Sketches' },
+  { id: NAV_IDS.desmos, icon: FunctionSquare, label: 'Desmos' },
+  { id: NAV_IDS.gearMaking, icon: Settings2, label: 'Gear Making' },
 ]
 
 /**
  * @param {{
  *   activeTab: string
  *   onTabChange: (id: string) => void
- *   registeredPanel: import('react').ReactNode
- *   sketchesPanel: import('react').ReactNode
+ *   drawingPanel: import('react').ReactNode
+ *   savedSketchesPanel: import('react').ReactNode
+ *   desmosPanel: import('react').ReactNode
+ *   gearMakingPanel: import('react').ReactNode
  * }} props
  */
-export function Sidebar({ activeTab, onTabChange, registeredPanel, sketchesPanel }) {
+export function Sidebar({
+  activeTab,
+  onTabChange,
+  drawingPanel,
+  savedSketchesPanel,
+  desmosPanel,
+  gearMakingPanel,
+}) {
   return (
-    <aside className="flex h-full w-[220px] shrink-0 flex-col border-r border-gg-border bg-gg-sidebar">
+    <aside className="flex h-full w-[232px] shrink-0 flex-col border-r border-gg-border bg-gg-sidebar">
       <div className="flex items-center gap-2 border-b border-gg-border px-4 py-3.5">
         <div className="flex size-8 items-center justify-center rounded-md bg-gg-accent-soft text-gg-accent">
-          <Shapes className="size-[18px]" strokeWidth={2} />
+          <PenTool className="size-[18px]" strokeWidth={2} />
         </div>
         <div className="text-left">
           <div className="text-[13px] font-semibold tracking-tight text-gg-text">
@@ -72,33 +64,23 @@ export function Sidebar({ activeTab, onTabChange, registeredPanel, sketchesPanel
       </nav>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-gg-border/80">
-        {activeTab === NAV_IDS.sketches ? (
+        {activeTab === NAV_IDS.drawing ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            {sketchesPanel}
+            {drawingPanel}
           </div>
-        ) : activeTab === NAV_IDS.registered ? (
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
-            {registeredPanel}
+        ) : activeTab === NAV_IDS.savedSketches ? (
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            {savedSketchesPanel}
           </div>
-        ) : (
-          <div className="overflow-y-auto overflow-x-hidden p-3 text-[12px] leading-relaxed text-gg-muted">
-            {activeTab === NAV_IDS.gears && (
-              <span>
-                Gear and mechanism tools will live here. Use the canvas to sketch
-                geometry.
-              </span>
-            )}
-            {activeTab === NAV_IDS.stacks && (
-              <span>Stack presets and ordering — coming soon.</span>
-            )}
-            {activeTab === NAV_IDS.projects && (
-              <span>Save and open projects — coming soon.</span>
-            )}
-            {activeTab === NAV_IDS.library && (
-              <span>Reusable parts library — coming soon.</span>
-            )}
+        ) : activeTab === NAV_IDS.desmos ? (
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            {desmosPanel}
           </div>
-        )}
+        ) : activeTab === NAV_IDS.gearMaking ? (
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            {gearMakingPanel}
+          </div>
+        ) : null}
       </div>
     </aside>
   )

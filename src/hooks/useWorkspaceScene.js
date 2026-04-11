@@ -22,7 +22,6 @@ import {
   geometryFromSketchPayload,
   workspaceHasDrawableContent,
 } from '../lib/sketchPayload.js'
-import { applyAllPendingCuts } from '../lib/sketchBooleanCut.js'
 import { deleteSketchEntities } from '../lib/sketchDelete.js'
 import {
   cloneWorkspaceData,
@@ -275,6 +274,7 @@ export function useWorkspaceScene(options = {}) {
     curves: true,
     shapes: true,
     relations: true,
+    registered: true,
   })
 
   const [selectedShape, setSelectedShape] = useState(null)
@@ -399,16 +399,6 @@ export function useWorkspaceScene(options = {}) {
     [shapeFillHex],
   )
 
-  const executePendingCuts = useCallback(() => {
-    const fill = shapeFillRgba ?? 'rgba(59, 130, 246, 0.22)'
-    commit((d) => {
-      const next = applyAllPendingCuts(d, nextId, {
-        defaultPolygonFill: fill,
-      })
-      return next ?? d
-    })
-  }, [commit, nextId, shapeFillRgba])
-
   const placementOptions = useMemo(
     () => ({
       snapToGrid,
@@ -464,7 +454,7 @@ export function useWorkspaceScene(options = {}) {
       documentUnits,
       showAxisTickValues,
       showAxisNameLabels,
-      gridMode,
+      axisNumberFormat,
       showAngleDegrees,
     ],
   )
@@ -713,7 +703,6 @@ export function useWorkspaceScene(options = {}) {
     splines: data.splines ?? [],
     constraints: data.constraints ?? [],
     dimensions: data.dimensions ?? [],
-    pendingCuts: data.pendingCuts ?? [],
     setDrivingDimensionValue,
     commit,
     checkpoint,
@@ -722,7 +711,6 @@ export function useWorkspaceScene(options = {}) {
     redo,
     clear,
     deleteSelectedSketch,
-    executePendingCuts,
     canUndo,
     canRedo,
     geomDraft,

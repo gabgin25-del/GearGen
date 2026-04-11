@@ -12,6 +12,9 @@ import { useTheme } from '../../context/ThemeContext.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
 import { useSketches } from '../../context/SketchesContext.jsx'
 import { DEFAULT_GRID_STEP } from '../../lib/gridSnap.js'
+import { DesmosPanel } from '../workspace/DesmosPanel.jsx'
+import { DrawingToolsPanel } from '../workspace/DrawingToolsPanel.jsx'
+import { GearMakingPanel } from '../workspace/GearMakingPanel.jsx'
 import { RegisteredShapesPanel } from '../workspace/RegisteredShapesPanel.jsx'
 import { SketchesPanel } from '../workspace/SketchesPanel.jsx'
 import { WorkspaceCanvas } from '../workspace/WorkspaceCanvas.jsx'
@@ -55,7 +58,7 @@ export function AppShell() {
   const scene = useWorkspaceScene({ onSketchMessage: toast.show })
   const { theme, toggleTheme } = useTheme()
   const [topChromeOpen, setTopChromeOpen] = useState(true)
-  const [sidebarTab, setSidebarTab] = useState('gears')
+  const [sidebarTab, setSidebarTab] = useState('drawing')
   const zoomPct = Math.round(scene.zoom * 100)
   const toolLabel = TOOL_LABEL[scene.tool] ?? scene.tool
 
@@ -80,8 +83,10 @@ export function AppShell() {
       `Sketch ${new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
       makeGearGenPayload('gearge-v1', geometry, { desmosState: null }),
     )
-    toast.show('Sketch saved — open the Sketches tab to load or rename it.')
-  }, [scene.canSaveSketch, scene.exportWorkspaceJson, addSketch, toast])
+    toast.show(
+      'Sketch saved — open the Saved Sketches tab to load or rename it.',
+    )
+  }, [scene, addSketch, toast])
 
   const settingsMenu = (
     <WorkspaceSettingsMenu
@@ -96,7 +101,35 @@ export function AppShell() {
       <Sidebar
         activeTab={sidebarTab}
         onTabChange={setSidebarTab}
-        sketchesPanel={
+        drawingPanel={
+          <DrawingToolsPanel
+            tool={scene.tool}
+            onToolChange={handleToolChange}
+            ribbonSectionsOpen={scene.ribbonSectionsOpen}
+            onRibbonSectionToggle={scene.toggleRibbonSection}
+            presetNgonSides={scene.presetNgonSides}
+            onPresetNgonSidesChange={scene.setPresetNgonSides}
+            sketchSelection={scene.sketchSelection}
+            applySketchRelation={scene.applySketchRelation}
+            arcMode={scene.arcMode}
+            onArcModeChange={scene.setArcMode}
+            splineType={scene.splineType}
+            onSplineTypeChange={scene.setSplineType}
+            splineTension={scene.splineTension}
+            onSplineTensionChange={scene.setSplineTension}
+            splineClosed={scene.splineClosed}
+            onSplineClosedChange={scene.setSplineClosed}
+            splineSegmentsPerSpan={scene.splineSegmentsPerSpan}
+            onSplineSegmentsPerSpanChange={scene.setSplineSegmentsPerSpan}
+            splinePanelOpen={scene.splinePanelOpen}
+            cutMode={scene.cutMode}
+            onCutModeChange={scene.setCutMode}
+            registeredShapesSlot={
+              <RegisteredShapesPanel workspaceData={scene.workspaceData} />
+            }
+          />
+        }
+        savedSketchesPanel={
           <SketchesPanel
             sketchIsExportable={scene.sketchIsExportable}
             exportWorkspaceJson={scene.exportWorkspaceJson}
@@ -104,9 +137,8 @@ export function AppShell() {
             onMessage={toast.show}
           />
         }
-        registeredPanel={
-          <RegisteredShapesPanel workspaceData={scene.workspaceData} />
-        }
+        desmosPanel={<DesmosPanel />}
+        gearMakingPanel={<GearMakingPanel />}
       />
       <main className="relative flex min-h-0 min-w-0 flex-1 flex-col p-4">
         {topChromeOpen ? (
@@ -165,25 +197,6 @@ export function AppShell() {
               onRedo={scene.redo}
               canSaveSketch={scene.canSaveSketch}
               onSaveSketch={handleSaveSketch}
-              ribbonSectionsOpen={scene.ribbonSectionsOpen}
-              onRibbonSectionToggle={scene.toggleRibbonSection}
-              presetNgonSides={scene.presetNgonSides}
-              onPresetNgonSidesChange={scene.setPresetNgonSides}
-              sketchSelection={scene.sketchSelection}
-              applySketchRelation={scene.applySketchRelation}
-              arcMode={scene.arcMode}
-              onArcModeChange={scene.setArcMode}
-              splineType={scene.splineType}
-              onSplineTypeChange={scene.setSplineType}
-              splineTension={scene.splineTension}
-              onSplineTensionChange={scene.setSplineTension}
-              splineClosed={scene.splineClosed}
-              onSplineClosedChange={scene.setSplineClosed}
-              splineSegmentsPerSpan={scene.splineSegmentsPerSpan}
-              onSplineSegmentsPerSpanChange={scene.setSplineSegmentsPerSpan}
-              splinePanelOpen={scene.splinePanelOpen}
-              cutMode={scene.cutMode}
-              onCutModeChange={scene.setCutMode}
             />
           </>
         ) : (
@@ -310,7 +323,6 @@ export function AppShell() {
           splines={scene.splines}
           constraints={scene.constraints}
           dimensions={scene.dimensions}
-          pendingCuts={scene.pendingCuts}
           arcMode={scene.arcMode}
           splineType={scene.splineType}
           splineTension={scene.splineTension}
@@ -343,7 +355,6 @@ export function AppShell() {
           setDrivingDimensionValue={scene.setDrivingDimensionValue}
           cutMode={scene.cutMode}
           deleteSelectedSketch={scene.deleteSelectedSketch}
-          executePendingCuts={scene.executePendingCuts}
           allowRegionFill={scene.allowRegionFill}
           sketchLockState={scene.sketchLockState}
           theme={theme}

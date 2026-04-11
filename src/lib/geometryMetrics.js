@@ -111,9 +111,9 @@ export function arcSweepCenterFromCursor(
   const a0 = Math.atan2(p1y - cy, p1x - cx)
   const a1 = Math.atan2(p2y - cy, p2x - cx)
   let minor = a1 - a0
-  while (minor <= -Math.PI) minor += 2 * Math.PI
-  while (minor > Math.PI) minor -= 2 * Math.PI
-  const major = minor > 0 ? minor - 2 * Math.PI : minor + 2 * Math.PI
+  while (minor < 0) minor += 2 * Math.PI
+  while (minor >= 2 * Math.PI) minor -= 2 * Math.PI
+  const major = 2 * Math.PI - minor
   const am = Math.atan2(my - cy, mx - cx)
   const midDist = (sweep) => {
     const mid = a0 + sweep / 2
@@ -127,14 +127,11 @@ export function arcSweepCenterFromCursor(
   const candidates = []
   const seen = new Set()
   for (const b of bases) {
-    for (let k = -1; k <= 1; k++) {
-      const s = b + k * twoPi
-      if (Math.abs(s) > twoPi + 1e-9 || Math.abs(s) < 1e-4) continue
-      const key = Math.round(s * 1e6)
-      if (seen.has(key)) continue
-      seen.add(key)
-      candidates.push(s)
-    }
+    if (Math.abs(b) < 1e-4 || b > twoPi + 1e-9) continue
+    const key = Math.round(b * 1e6)
+    if (seen.has(key)) continue
+    seen.add(key)
+    candidates.push(b)
   }
   let sweep = minor
   let bestD = Infinity

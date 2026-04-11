@@ -32,6 +32,27 @@ export function solveWithPlaneGcs(data) {
     w.set_max_iterations(120)
     w.set_convergence_threshold(1e-9)
     w.push_primitives_and_params(primitives)
+    // Warm-start: seed solver from current point coordinates to reduce flips when
+    // driving dimensions change (continuous deformation vs. distant alternative roots).
+    try {
+      const currentById = new Map((workData.points ?? []).map((p) => [p.id, p]))
+      const prims = w.sketch_index?.get_primitives?.() ?? []
+      for (const prim of prims) {
+        if (prim?.type !== 'point') continue
+        const cur = currentById.get(prim.id)
+        if (!cur) continue
+        if (typeof prim.set_x === 'function') prim.set_x(cur.x)
+        if (typeof prim.set_y === 'function') prim.set_y(cur.y)
+        if (typeof prim.setValue === 'function') {
+          prim.setValue('x', cur.x)
+          prim.setValue('y', cur.y)
+        }
+        if ('x' in prim) prim.x = cur.x
+        if ('y' in prim) prim.y = cur.y
+      }
+    } catch {
+      // Best-effort: older wrappers may not expose mutable primitive setters.
+    }
     return w.solve(Algorithm.DogLeg)
   }
 

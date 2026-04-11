@@ -55,7 +55,7 @@ export function hitPolygonInterior(wx, wy, poly, pointById) {
 
 /**
  * If the cursor is on a polygon edge, return the matching segment id when possible
- * (boundarySegmentIds or endpoint lookup in `segments`).
+ * (prefer `boundarySegmentIds` so each perimeter edge is individually selectable).
  * @param {{ id: string; a: string; b: string }[]} segments
  * @returns {string | null}
  */
