@@ -17,6 +17,7 @@ import { DrawingToolsPanel } from '../workspace/DrawingToolsPanel.jsx'
 import { GearMakingPanel } from '../workspace/GearMakingPanel.jsx'
 import { RegisteredShapesPanel } from '../workspace/RegisteredShapesPanel.jsx'
 import { SketchesPanel } from '../workspace/SketchesPanel.jsx'
+import { DesmosMainView } from '../workspace/DesmosMainView.jsx'
 import { WorkspaceCanvas } from '../workspace/WorkspaceCanvas.jsx'
 import { WorkspaceSettingsMenu } from '../workspace/WorkspaceSettingsMenu.jsx'
 import { WorkspaceToolbar } from '../workspace/WorkspaceToolbar.jsx'
@@ -62,6 +63,15 @@ export function AppShell() {
   const [sidebarTab, setSidebarTab] = useState('drawing')
   const zoomPct = Math.round(scene.zoom * 100)
   const toolLabel = TOOL_LABEL[scene.tool] ?? scene.tool
+  const mainTitle =
+    sidebarTab === NAV_IDS.drawing
+      ? 'Canvas'
+      : sidebarTab === NAV_IDS.desmos
+        ? 'Desmos'
+        : sidebarTab === NAV_IDS.savedSketches
+          ? 'Saved Sketches'
+          : 'Gear Making'
+  const isDesmosTab = sidebarTab === NAV_IDS.desmos
 
   const handleToolChange = useCallback(
     (id) => {
@@ -122,16 +132,62 @@ export function AppShell() {
             onMessage={toast.show}
           />
         }
-        desmosPanel={<DesmosPanel workspaceData={scene.workspaceData} />}
+        desmosPanel={
+          <DesmosPanel
+            workspaceData={scene.workspaceData}
+            commit={scene.commit}
+            nextId={scene.nextId}
+            defaultFillRgba={scene.shapeStyle.shapeFillRgba}
+            onMessage={toast.show}
+          />
+        }
         gearMakingPanel={<GearMakingPanel />}
       />
       <main className="relative flex min-h-0 min-w-0 flex-1 flex-col p-4">
-        {topChromeOpen ? (
+        {isDesmosTab ? (
+          <>
+            <header className="mb-2 flex shrink-0 items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h1 className="text-[15px] font-medium tracking-tight text-gg-text">
+                  {mainTitle}
+                </h1>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <a
+                  href="#help"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-md border border-gg-border text-gg-muted transition-colors hover:border-gg-accent/50 hover:text-gg-text"
+                  title="Help: splines and tools"
+                  aria-label="Open help page (splines)"
+                >
+                  <CircleHelp className="size-4" strokeWidth={2} aria-hidden />
+                </a>
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-md border border-gg-border text-gg-muted transition-colors hover:border-gg-accent/50 hover:text-gg-text"
+                  aria-label={
+                    theme === 'dark'
+                      ? 'Switch to light mode'
+                      : 'Switch to dark mode'
+                  }
+                >
+                  {theme === 'dark' ? (
+                    <Sun className="size-4" strokeWidth={2} aria-hidden />
+                  ) : (
+                    <Moon className="size-4" strokeWidth={2} aria-hidden />
+                  )}
+                </button>
+                {settingsMenu}
+              </div>
+            </header>
+            <DesmosMainView theme={theme} />
+          </>
+        ) : topChromeOpen ? (
           <>
             <header className="mb-1 flex shrink-0 items-start justify-between gap-2">
               <div className="min-w-0">
                 <h1 className="text-[15px] font-medium tracking-tight text-gg-text">
-                  Canvas
+                  {mainTitle}
                 </h1>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
@@ -207,7 +263,7 @@ export function AppShell() {
         ) : (
           <div className="mb-2 flex min-h-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-gg-border bg-gg-sidebar/25 px-3 py-2">
             <span className="text-[13px] font-medium tracking-tight text-gg-text">
-              Canvas
+              {mainTitle}
             </span>
             <span className="text-[12px] text-gg-muted">
               Tool{' '}
@@ -290,80 +346,84 @@ export function AppShell() {
             </button>
           </div>
         )}
-        {scene.workspaceData?.solverDiagnostics?.engine === 'planegcs' &&
-        scene.workspaceData.solverDiagnostics.overConstrained ? (
-          <div
-            className={
-              theme === 'light'
-                ? 'mb-2 shrink-0 rounded-md border border-red-600/45 bg-red-600/10 px-3 py-2 text-[12px] text-red-900'
-                : 'mb-2 shrink-0 rounded-md border border-red-500/55 bg-red-500/12 px-3 py-2 text-[12px] text-red-200'
-            }
-            role="status"
-          >
-            Sketch is over-constrained (PlaneGCS). Remove or relax redundant
-            constraints, or adjust driving dimensions so the system can
-            resolve.
-          </div>
+        {!isDesmosTab ? (
+          <>
+            {scene.workspaceData?.solverDiagnostics?.engine === 'planegcs' &&
+            scene.workspaceData.solverDiagnostics.overConstrained ? (
+              <div
+                className={
+                  theme === 'light'
+                    ? 'mb-2 shrink-0 rounded-md border border-red-600/45 bg-red-600/10 px-3 py-2 text-[12px] text-red-900'
+                    : 'mb-2 shrink-0 rounded-md border border-red-500/55 bg-red-500/12 px-3 py-2 text-[12px] text-red-200'
+                }
+                role="status"
+              >
+                Sketch is over-constrained (PlaneGCS). Remove or relax redundant
+                constraints, or adjust driving dimensions so the system can
+                resolve.
+              </div>
+            ) : null}
+            <WorkspaceCanvas
+              tool={scene.tool}
+              pan={scene.pan}
+              setPan={scene.setPan}
+              zoom={scene.zoom}
+              setZoom={scene.setZoom}
+              viewDrawOptions={scene.viewDrawOptions}
+              labelDrawOptions={scene.labelDrawOptions}
+              selectedShape={scene.selectedShape}
+              setSelectedShape={scene.setSelectedShape}
+              originPickNextClick={scene.originPickNextClick}
+              confirmOriginAtWorld={scene.confirmOriginAtWorld}
+              cancelOriginPick={scene.cancelOriginPick}
+              strokes={scene.strokes}
+              points={scene.points}
+              segments={scene.segments}
+              circles={scene.circles}
+              polygons={scene.polygons}
+              arcs={scene.arcs}
+              angles={scene.angles}
+              splines={scene.splines}
+              constraints={scene.constraints}
+              dimensions={scene.dimensions}
+              arcMode={scene.arcMode}
+              splineType={scene.splineType}
+              splineTension={scene.splineTension}
+              splineClosed={scene.splineClosed}
+              splineSegmentsPerSpan={scene.splineSegmentsPerSpan}
+              shapeStyle={scene.shapeStyle}
+              commit={scene.commit}
+              checkpoint={scene.checkpoint}
+              apply={scene.apply}
+              geomDraft={scene.geomDraft}
+              setGeomDraft={scene.setGeomDraft}
+              preview={scene.preview}
+              setPreview={scene.setPreview}
+              nextId={scene.nextId}
+              liveStroke={scene.liveStroke}
+              setLiveStroke={scene.setLiveStroke}
+              selectedPointId={scene.selectedPointId}
+              setSelectedPointId={scene.setSelectedPointId}
+              placementOptions={scene.placementOptions}
+              autoFillClosedSplineLoops={scene.autoFillClosedSplineLoops}
+              showDimensions={scene.showDimensions}
+              showRelations={scene.showRelations}
+              presetNgonSides={scene.presetNgonSides}
+              sketchSelection={scene.sketchSelection}
+              toggleSketchSelectionItem={scene.toggleSketchSelectionItem}
+              clearSketchSelection={scene.clearSketchSelection}
+              replaceSketchSelection={scene.replaceSketchSelection}
+              unionSketchSelection={scene.unionSketchSelection}
+              setTool={scene.setTool}
+              setDrivingDimensionValue={scene.setDrivingDimensionValue}
+              cutMode={scene.cutMode}
+              deleteSelectedSketch={scene.deleteSelectedSketch}
+              allowRegionFill={scene.allowRegionFill}
+              sketchLockState={scene.sketchLockState}
+              theme={theme}
+            />
+          </>
         ) : null}
-        <WorkspaceCanvas
-          tool={scene.tool}
-          pan={scene.pan}
-          setPan={scene.setPan}
-          zoom={scene.zoom}
-          setZoom={scene.setZoom}
-          viewDrawOptions={scene.viewDrawOptions}
-          labelDrawOptions={scene.labelDrawOptions}
-          selectedShape={scene.selectedShape}
-          setSelectedShape={scene.setSelectedShape}
-          originPickNextClick={scene.originPickNextClick}
-          confirmOriginAtWorld={scene.confirmOriginAtWorld}
-          cancelOriginPick={scene.cancelOriginPick}
-          strokes={scene.strokes}
-          points={scene.points}
-          segments={scene.segments}
-          circles={scene.circles}
-          polygons={scene.polygons}
-          arcs={scene.arcs}
-          angles={scene.angles}
-          splines={scene.splines}
-          constraints={scene.constraints}
-          dimensions={scene.dimensions}
-          arcMode={scene.arcMode}
-          splineType={scene.splineType}
-          splineTension={scene.splineTension}
-          splineClosed={scene.splineClosed}
-          splineSegmentsPerSpan={scene.splineSegmentsPerSpan}
-          shapeStyle={scene.shapeStyle}
-          commit={scene.commit}
-          checkpoint={scene.checkpoint}
-          apply={scene.apply}
-          geomDraft={scene.geomDraft}
-          setGeomDraft={scene.setGeomDraft}
-          preview={scene.preview}
-          setPreview={scene.setPreview}
-          nextId={scene.nextId}
-          liveStroke={scene.liveStroke}
-          setLiveStroke={scene.setLiveStroke}
-          selectedPointId={scene.selectedPointId}
-          setSelectedPointId={scene.setSelectedPointId}
-          placementOptions={scene.placementOptions}
-          autoFillClosedSplineLoops={scene.autoFillClosedSplineLoops}
-          showDimensions={scene.showDimensions}
-          showRelations={scene.showRelations}
-          presetNgonSides={scene.presetNgonSides}
-          sketchSelection={scene.sketchSelection}
-          toggleSketchSelectionItem={scene.toggleSketchSelectionItem}
-          clearSketchSelection={scene.clearSketchSelection}
-          replaceSketchSelection={scene.replaceSketchSelection}
-          unionSketchSelection={scene.unionSketchSelection}
-          setTool={scene.setTool}
-          setDrivingDimensionValue={scene.setDrivingDimensionValue}
-          cutMode={scene.cutMode}
-          deleteSelectedSketch={scene.deleteSelectedSketch}
-          allowRegionFill={scene.allowRegionFill}
-          sketchLockState={scene.sketchLockState}
-          theme={theme}
-        />
       </main>
     </div>
   )
