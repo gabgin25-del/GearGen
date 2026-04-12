@@ -9,6 +9,9 @@ import { emptyWorkspaceData } from './workspaceReducer.js'
 /** High-density sampling along each curve layer */
 export const DEFAULT_SAMPLE_COUNT = 256
 
+/** Display-only samples for ExactParametricCurve canvas rendering */
+export const DISPLAY_SAMPLE_HIGH = 384
+
 /**
  * @param {object} calculator Desmos.GraphingCalculator
  * @param {string} latex
@@ -561,24 +564,26 @@ function substituteXY(expr, mx, my) {
  */
 async function isInsideInequality(calculator, latex, mx, my) {
   const L = latex.trim()
-  let m = L.match(/^([\s\S]+?)\\le([\s\S]+)$/)
-  if (!m) m = L.match(/^([\s\S]+?)\\leq([\s\S]+)$/)
-  if (m) {
-    const lhs = m[1].trim()
-    const rhs = m[2].trim()
+  const tryLe = async (lhs, rhs) => {
     const diff = `\\left(${rhs}\\right)-\\left(${lhs}\\right)`
     const v = await helperNumeric(calculator, substituteXY(diff, mx, my))
     return v != null && Number.isFinite(v) && v >= -1e-5
   }
-  m = L.match(/^([\s\S]+?)\\ge([\s\S]+)$/)
-  if (!m) m = L.match(/^([\s\S]+?)\\geq([\s\S]+)$/)
-  if (m) {
-    const lhs = m[1].trim()
-    const rhs = m[2].trim()
+  const tryGe = async (lhs, rhs) => {
     const diff = `\\left(${lhs}\\right)-\\left(${rhs}\\right)`
     const v = await helperNumeric(calculator, substituteXY(diff, mx, my))
     return v != null && Number.isFinite(v) && v >= -1e-5
   }
+  let m = L.match(/^([\s\S]+?)\\le([\s\S]+)$/)
+  if (!m) m = L.match(/^([\s\S]+?)\\leq([\s\S]+)$/)
+  if (m) return tryLe(m[1].trim(), m[2].trim())
+  m = L.match(/^([\s\S]+?)\\ge([\s\S]+)$/)
+  if (!m) m = L.match(/^([\s\S]+?)\\geq([\s\S]+)$/)
+  if (m) return tryGe(m[1].trim(), m[2].trim())
+  m = L.match(/^([\s\S]+?)<([\s\S]+)$/)
+  if (m) return tryLe(m[1].trim(), m[2].trim())
+  m = L.match(/^([\s\S]+?)>([\s\S]+)$/)
+  if (m) return tryGe(m[1].trim(), m[2].trim())
   return false
 }
 
@@ -670,7 +675,7 @@ export async function findRegionExpressionAtMath(calculator, mx, my) {
   for (const ex of exprs) {
     if (ex.type !== 'expression' || !ex.latex) continue
     const latex = ex.latex
-    if (/\\le|\\leq|\\ge|\\geq|≤|≥/.test(latex)) {
+    if (/\\le|\\leq|\\ge|\\geq|≤|≥/.test(latex) || /[<>](?!=)/.test(latex)) {
       const ok = await isInsideInequality(calculator, latex, mx, my)
       if (ok) return ex
       continue
@@ -689,9 +694,32 @@ export async function findRegionExpressionAtMath(calculator, mx, my) {
         Math.hypot(first.x - last.x, first.y - last.y) <
         Math.max(1e-2, 1e-4 * (Math.abs(first.x) + Math.abs(first.y) + 1))
       if (closed && pointInPolygon({ x: mx, y: my }, pts)) return ex
+      if (!closed) {
+        const tol = Math.max(1e-2, 2e-4 * (Math.abs(mx) + Math.abs(my) + 1))
+        for (let i = 0; i < pts.length - 1; i++) {
+          const a = pts[i]
+          const b = pts[i + 1]
+          const d = distToSeg(mx, my, a.x, a.y, b.x, b.y)
+          if (d <= tol) return ex
+        }
+      }
     }
   }
   return null
+}
+
+function distToSeg(px, py, ax, ay, bx, by) {
+  const abx = bx - ax
+  const aby = by - ay
+  const apx = px - ax
+  const apy = py - ay
+  const ab2 = abx * abx + aby * aby
+  if (ab2 < 1e-18) return Math.hypot(px - ax, py - ay)
+  let t = (apx * abx + apy * aby) / ab2
+  t = Math.max(0, Math.min(1, t))
+  const qx = ax + t * abx
+  const qy = ay + t * aby
+  return Math.hypot(px - qx, py - qy)
 }
 
 /**
@@ -723,49 +751,63 @@ export async function sampleExpressionToPolyline(
 }
 
 /**
- * Build sketch geometry + parametric entity for one Desmos expression region.
+ * Export exact Desmos LaTeX + high-res display samples (no segment approximation as source of truth).
  *
  * @param {object} calculator
  * @param {object} expression
  * @param {(p: string) => string} nextId
  * @param {{ defaultFillRgba?: string }} [opts]
- * @returns {Promise<object | null>} workspace data snapshot (geometry fields only)
+ * @returns {Promise<object | null>} workspace patch (empty sketch + exact curve + desmosState)
  */
-export async function buildSketchFromDesmosExpression(
+export async function buildExactCurveWorkspaceExport(
   calculator,
   expression,
   nextId,
   opts = {},
 ) {
+  const raw = expression.latex ?? ''
+  if (!raw || typeof raw !== 'string') return null
+
+  const displaySamples =
+    (await sampleExpressionToPolyline(
+      calculator,
+      expression,
+      DISPLAY_SAMPLE_HIGH,
+    )) ?? []
+
+  const first = displaySamples[0]
+  const last = displaySamples[displaySamples.length - 1]
+  const closed =
+    displaySamples.length >= 3 &&
+    first &&
+    last &&
+    Math.hypot(first.x - last.x, first.y - last.y) <
+      Math.max(1e-2, 1e-4 * (Math.abs(first.x) + Math.abs(first.y) + 1))
+
   const base = emptyWorkspaceData()
-  const pts = await sampleExpressionToPolyline(calculator, expression)
-  if (!pts || pts.length < 2) return null
-  const merged = mergePolylinesIntoWorkspace(
-    base,
-    [pts],
-    nextId,
-    opts,
-  )
-  const peId = nextId('pentity')
-  merged.parametricEntities = [
-    ...(merged.parametricEntities ?? []),
+  const id = nextId('exact')
+  base.exactParametricCurves = [
     {
-      id: peId,
-      source: 'desmos-region',
+      id,
+      latex: raw,
       desmosExpressionId: expression.id,
-      boundaryLatex: normalizeInequalityToBoundary(expression.latex ?? ''),
-      originalLatex: expression.latex ?? '',
+      displaySamples,
+      closed: !!closed,
+      fill: opts.defaultFillRgba ?? 'rgba(59, 130, 246, 0.22)',
+      geoRegistered: true,
+      source: 'desmos-exact-export',
     },
   ]
-  let st = null
   try {
-    st = calculator.getState?.() ?? null
+    base.desmosState = calculator.getState?.() ?? null
   } catch {
-    st = null
+    base.desmosState = null
   }
-  merged.desmosState = st
-  return merged
+  return base
 }
+
+/** @deprecated Use buildExactCurveWorkspaceExport */
+export const buildSketchFromDesmosExpression = buildExactCurveWorkspaceExport
 
 /**
  * Capture graph thumbnail as data URL when supported.

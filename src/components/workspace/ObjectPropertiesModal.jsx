@@ -126,6 +126,28 @@ function describeEntity(data, entity, docUnits) {
     }
   }
 
+  if (entity.kind === 'exactParametricCurve') {
+    const ex = (data.exactParametricCurves ?? []).find(
+      (x) => x.id === entity.id,
+    )
+    if (!ex) return { title: 'Exact curve', rows: [] }
+    const latex = ex.latex ?? ''
+    const preview =
+      latex.length > 120 ? `${latex.slice(0, 117)}…` : latex
+    return {
+      title: 'Exact curve (Desmos)',
+      rows: [
+        { k: 'ID', v: entity.id },
+        { k: 'Closed', v: ex.closed ? 'Yes' : 'No' },
+        { k: 'LaTeX', v: preview || '—' },
+        {
+          k: 'Display samples',
+          v: String((ex.displaySamples ?? []).length),
+        },
+      ],
+    }
+  }
+
   if (entity.kind === 'spline') {
     const sp = (data.splines ?? []).find((x) => x.id === entity.id)
     if (!sp) return { title: 'Spline', rows: [] }

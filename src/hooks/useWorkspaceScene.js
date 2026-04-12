@@ -289,6 +289,8 @@ export function useWorkspaceScene(options = {}) {
   const [splineSegmentsPerSpan, setSplineSegmentsPerSpan] = useState(14)
   const [presetNgonSides, setPresetNgonSides] = useState(6)
   const [sketchSelection, setSketchSelection] = useState([])
+  /** Bumps when a workspace snapshot is applied — Desmos hydrates from this, not from every desmosState keystroke. */
+  const [workspaceLoadGeneration, setWorkspaceLoadGeneration] = useState(0)
 
   const idRef = useRef(0)
   const nextId = useCallback((prefix) => {
@@ -339,6 +341,7 @@ export function useWorkspaceScene(options = {}) {
       type: 'COMMIT',
       updater: () => cloneWorkspaceData(emptyWorkspaceData()),
     })
+    setWorkspaceLoadGeneration((g) => g + 1)
   }, [clearEphemeral])
 
   const deleteSelectedSketch = useCallback(() => {
@@ -622,6 +625,7 @@ export function useWorkspaceScene(options = {}) {
         type: 'COMMIT',
         updater: () => cloneWorkspaceData(geo),
       })
+      setWorkspaceLoadGeneration((g) => g + 1)
     },
     [clearEphemeral, dispatch, onSketchMessage],
   )
@@ -785,5 +789,6 @@ export function useWorkspaceScene(options = {}) {
     loadWorkspaceSnapshot,
     exportWorkspaceJson,
     sketchIsExportable,
+    workspaceLoadGeneration,
   }
 }

@@ -56,6 +56,7 @@ export function workspaceHasDrawableContent(data) {
     (data.arcs?.length ?? 0) > 0 ||
     (data.splines?.length ?? 0) > 0 ||
     (data.strokes?.length ?? 0) > 0 ||
-    (data.angles?.length ?? 0) > 0
+    (data.angles?.length ?? 0) > 0 ||
+    (data.exactParametricCurves?.length ?? 0) > 0
   )
 }

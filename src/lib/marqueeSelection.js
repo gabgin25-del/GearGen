@@ -135,5 +135,17 @@ export function collectSketchEntitiesInWorldRect(
     if (hit) add('spline', sp.id)
   }
 
+  for (const ex of data.exactParametricCurves ?? []) {
+    const samples = ex.displaySamples ?? []
+    let hit = false
+    for (const q of samples) {
+      if (pointInWorldRect(q.x, q.y, minWX, maxWX, minWY, maxWY)) {
+        hit = true
+        break
+      }
+    }
+    if (hit) add('exactParametricCurve', ex.id)
+  }
+
   return out
 }

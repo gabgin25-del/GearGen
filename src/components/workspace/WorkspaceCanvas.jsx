@@ -335,7 +335,7 @@ function buildSplinePreviewPayload(
 /**
  * @param {number} wx
  * @param {number} wy
- * @param {{ points: object[]; segments: object[]; circles: object[]; polygons: object[]; arcs?: object[]; angles?: object[]; splines?: object[] }} data
+ * @param {{ points: object[]; segments: object[]; circles: object[]; polygons: object[]; arcs?: object[]; angles?: object[]; splines?: object[]; exactParametricCurves?: object[] }} data
  * @param {number} tolWorld
  */
 function pickShapeAtWorld(wx, wy, data, tolWorld) {
@@ -370,6 +370,23 @@ function pickShapeAtWorld(wx, wy, data, tolWorld) {
     }
     if (hitPolylineSamples(wx, wy, samples, tolWorld)) {
       return { kind: 'spline', id: sp.id }
+    }
+  }
+  const exactCurves = data.exactParametricCurves ?? []
+  for (let i = exactCurves.length - 1; i >= 0; i--) {
+    const ex = exactCurves[i]
+    const samples = ex.displaySamples ?? []
+    if (samples.length < 2) continue
+    if (
+      ex.closed &&
+      ex.fill &&
+      samples.length >= 3 &&
+      pointInPolygon(wx, wy, samples)
+    ) {
+      return { kind: 'exactParametricCurve', id: ex.id }
+    }
+    if (hitPolylineSamples(wx, wy, samples, tolWorld)) {
+      return { kind: 'exactParametricCurve', id: ex.id }
     }
   }
   for (let i = data.circles.length - 1; i >= 0; i--) {
@@ -462,6 +479,7 @@ export function WorkspaceCanvas({
   arcs,
   angles,
   splines,
+  exactParametricCurves = [],
   constraints = [],
   dimensions = [],
   arcMode,
@@ -837,6 +855,7 @@ export function WorkspaceCanvas({
       arcs,
       angles,
       splines,
+      exactParametricCurves,
       constraints,
       dimensions,
     }
@@ -848,6 +867,7 @@ export function WorkspaceCanvas({
     arcs,
     angles,
     splines,
+    exactParametricCurves,
     constraints,
     dimensions,
   ])
@@ -861,6 +881,7 @@ export function WorkspaceCanvas({
       arcs,
       angles,
       splines,
+      exactParametricCurves,
       constraints,
       dimensions,
     }),
@@ -872,6 +893,7 @@ export function WorkspaceCanvas({
       arcs,
       angles,
       splines,
+      exactParametricCurves,
       constraints,
       dimensions,
     ],
@@ -940,6 +962,13 @@ export function WorkspaceCanvas({
     return splines
   }, [splines, allowRegionFill])
 
+  const drawExactParametricCurves = useMemo(() => {
+    if (!allowRegionFill) {
+      return exactParametricCurves.map((ex) => ({ ...ex, fill: null }))
+    }
+    return exactParametricCurves
+  }, [exactParametricCurves, allowRegionFill])
+
   const paint = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas || size.width < 1 || size.height < 1) return
@@ -996,6 +1025,7 @@ export function WorkspaceCanvas({
       arcs,
       angles,
       splines: drawSplines,
+      exactParametricCurves: drawExactParametricCurves,
       preview,
       selectedPointId,
       hoverHighlight,
@@ -1027,6 +1057,7 @@ export function WorkspaceCanvas({
     arcs,
     angles,
     drawSplines,
+    drawExactParametricCurves,
     constraints,
     dimensions,
     showDimensions,
@@ -3908,12 +3939,17 @@ export function WorkspaceCanvas({
                   ? !!workspaceSnapshot.splines?.find(
                       (sp) => sp.id === sketchContextMenu.entity.id,
                     )?.isCut
-                  : false
+                  : sketchContextMenu.entity?.kind === 'exactParametricCurve'
+                    ? !!workspaceSnapshot.exactParametricCurves?.find(
+                        (ex) => ex.id === sketchContextMenu.entity.id,
+                      )?.isCut
+                    : false
           }
           onToggleCutGeometry={
             sketchContextMenu.entity?.kind === 'circle' ||
             sketchContextMenu.entity?.kind === 'polygon' ||
-            sketchContextMenu.entity?.kind === 'spline'
+            sketchContextMenu.entity?.kind === 'spline' ||
+            sketchContextMenu.entity?.kind === 'exactParametricCurve'
               ? () => {
                   const e = sketchContextMenu.entity
                   commit((d) => {
@@ -3930,6 +3966,18 @@ export function WorkspaceCanvas({
                         ...d,
                         polygons: d.polygons.map((p) =>
                           p.id === e.id ? { ...p, isCut: !p.isCut } : p,
+                        ),
+                      }
+                    }
+                    if (e.kind === 'exactParametricCurve') {
+                      return {
+                        ...d,
+                        exactParametricCurves: (
+                          d.exactParametricCurves ?? []
+                        ).map((ex) =>
+                          ex.id === e.id
+                            ? { ...ex, isCut: !ex.isCut }
+                            : ex,
                         ),
                       }
                     }

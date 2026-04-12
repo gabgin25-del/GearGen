@@ -640,6 +640,7 @@ function drawAxes(
  *   arcs?: { id: string; cx: number; cy: number; r: number; a0: number; sweep: number; fill?: string | null }[]
  *   angles?: { id: string; centerId: string; arm1Id: string; arm2Id: string }[]
  *   splines?: { id: string; vertexIds: string[]; splineType: string; tension?: number; closed?: boolean; segmentsPerSpan?: number; fill?: string | null; isCut?: boolean }[]
+ *   exactParametricCurves?: { id: string; latex?: string; displaySamples: { x: number; y: number }[]; closed?: boolean; fill?: string | null; isCut?: boolean }[]
  *   preview: null | object
  *   selectedPointId?: string | null
  *   hoverHighlight?: null | { kind: string; id: string }
@@ -676,6 +677,7 @@ export function drawWorkspaceScene(ctx, p) {
     arcs = [],
     angles = [],
     splines = [],
+    exactParametricCurves = [],
     preview,
     selectedPointId,
     hoverHighlight = null,
@@ -1015,6 +1017,18 @@ export function drawWorkspaceScene(ctx, p) {
         ctx.lineTo(samples[i].x, samples[i].y)
       }
       if (sp.closed) ctx.closePath()
+      ctx.stroke()
+    }
+    for (const ex of exactParametricCurves) {
+      if (!sketchSel('exactParametricCurve', ex.id)) continue
+      const samples = ex.displaySamples ?? []
+      if (samples.length < 2) continue
+      ctx.beginPath()
+      ctx.moveTo(samples[0].x, samples[0].y)
+      for (let i = 1; i < samples.length; i++) {
+        ctx.lineTo(samples[i].x, samples[i].y)
+      }
+      if (ex.closed) ctx.closePath()
       ctx.stroke()
     }
     ctx.restore()
@@ -1394,6 +1408,50 @@ export function drawWorkspaceScene(ctx, p) {
     for (let i = 1; i < samples.length; i++) {
       ctx.lineTo(samples[i].x, samples[i].y)
     }
+    ctx.stroke()
+    ctx.setLineDash([])
+  }
+
+  for (const ex of exactParametricCurves) {
+    const samples = ex.displaySamples ?? []
+    if (samples.length < 2) continue
+    if (ex.closed && ex.fill && samples.length >= 3 && fillRegions) {
+      ctx.beginPath()
+      ctx.moveTo(samples[0].x, samples[0].y)
+      for (let i = 1; i < samples.length; i++) {
+        ctx.lineTo(samples[i].x, samples[i].y)
+      }
+      ctx.closePath()
+      ctx.fillStyle = ex.isCut
+        ? 'rgba(239, 68, 68, 0.4)'
+        : ex.fill || pal.closedRegionFill
+      ctx.fill()
+    }
+
+    const exLw = lwGeom * 1.38
+    const exStrokeBase = ex.isCut ? 'rgba(220, 38, 38, 0.95)' : baseStroke
+    ctx.strokeStyle = shapeStrokeStyle(
+      hoverHighlight,
+      selectedShape,
+      ex.id,
+      'exactParametricCurve',
+      exStrokeBase,
+    )
+    ctx.lineWidth = shapeLineWidth(
+      exLw,
+      hoverHighlight,
+      selectedShape,
+      ex.id,
+      'exactParametricCurve',
+    )
+    if (ex.isCut) ctx.setLineDash([5 / z, 5 / z])
+    else ctx.setLineDash([])
+    ctx.beginPath()
+    ctx.moveTo(samples[0].x, samples[0].y)
+    for (let i = 1; i < samples.length; i++) {
+      ctx.lineTo(samples[i].x, samples[i].y)
+    }
+    if (ex.closed) ctx.closePath()
     ctx.stroke()
     ctx.setLineDash([])
   }

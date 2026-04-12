@@ -34,6 +34,11 @@ export function deleteSketchEntities(data, selection) {
   const killStroke = new Set(
     selection.filter((s) => s.kind === 'stroke').map((s) => s.id),
   )
+  const killExact = new Set(
+    selection
+      .filter((s) => s.kind === 'exactParametricCurve')
+      .map((s) => s.id),
+  )
 
   for (const s of data.segments ?? []) {
     if (killPt.has(s.a) || killPt.has(s.b)) killSeg.add(s.id)
@@ -99,6 +104,10 @@ export function deleteSketchEntities(data, selection) {
   const points = (data.points ?? []).filter((p) => !killPt.has(p.id))
 
   const strokes = (data.strokes ?? []).filter((s) => !killStroke.has(s.id))
+
+  const exactParametricCurves = (data.exactParametricCurves ?? []).filter(
+    (e) => !killExact.has(e.id),
+  )
 
   const alive = new Set()
   for (const p of points) alive.add(`point:${p.id}`)
@@ -179,6 +188,7 @@ export function deleteSketchEntities(data, selection) {
     angles,
     splines,
     strokes,
+    exactParametricCurves,
     constraints,
     dimensions,
   }

@@ -13,8 +13,11 @@ export const emptyWorkspaceData = () => ({
   dimensions: [],
   /** @type {object | null} Serialized Desmos.GraphingCalculator.getState() */
   desmosState: null,
-  /** @type {{ id: string; boundaryLatex?: string; originalLatex?: string; desmosExpressionId?: string; source?: string }[]} */
-  parametricEntities: [],
+  /**
+   * Desmos-origin exact curves: `latex` is authoritative; `displaySamples` is display-only.
+   * @type {{ id: string; latex: string; desmosExpressionId?: string; displaySamples: { x: number; y: number }[]; closed?: boolean; fill?: string | null; geoRegistered?: boolean; source?: string }[]}
+   */
+  exactParametricCurves: [],
 })
 
 export function cloneWorkspaceData(data) {
@@ -62,7 +65,22 @@ export function cloneWorkspaceData(data) {
       data.desmosState != null
         ? JSON.parse(JSON.stringify(data.desmosState))
         : null,
-    parametricEntities: (data.parametricEntities ?? []).map((e) => ({ ...e })),
+    exactParametricCurves: [
+      ...(data.exactParametricCurves ?? []).map((e) => ({
+        ...e,
+        displaySamples: (e.displaySamples ?? []).map((q) => ({ ...q })),
+      })),
+      ...(data.parametricEntities ?? []).map((pe) => ({
+        id: pe.id,
+        latex: String(pe.originalLatex ?? pe.boundaryLatex ?? ''),
+        desmosExpressionId: pe.desmosExpressionId,
+        displaySamples: [],
+        closed: false,
+        fill: null,
+        geoRegistered: true,
+        source: 'legacy-parametric-entity',
+      })),
+    ],
   }
 }
 

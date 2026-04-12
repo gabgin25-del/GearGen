@@ -177,7 +177,8 @@ export function AppShell() {
         >
           <DesmosMainView
             theme={theme}
-            savedDesmosState={scene.workspaceData?.desmosState ?? null}
+            workspaceDesmosState={scene.workspaceData?.desmosState ?? null}
+            workspaceLoadGeneration={scene.workspaceLoadGeneration}
             commit={scene.commit}
             desmosVisible={isDesmosTab}
             addSketch={addSketch}
@@ -390,6 +391,7 @@ export function AppShell() {
               arcs={scene.arcs}
               angles={scene.angles}
               splines={scene.splines}
+              exactParametricCurves={scene.workspaceData?.exactParametricCurves ?? []}
               constraints={scene.constraints}
               dimensions={scene.dimensions}
               arcMode={scene.arcMode}
