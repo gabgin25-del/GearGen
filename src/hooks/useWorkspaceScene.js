@@ -13,8 +13,6 @@ import {
   displayToWorldMm,
   UNIT_PRESET_OPTIONS,
 } from '../lib/sketchUnits.js'
-
-const VALID_UNIT_PRESETS = new Set(UNIT_PRESET_OPTIONS.map((o) => o.id))
 import { relationTargetsFromSelection } from '../lib/relationTargetsFromSelection.js'
 import { tryCommitConstraint } from '../lib/sketchConstraintQuality.js'
 import { computeSketchLockState } from '../lib/sketchLockState.js'
@@ -29,6 +27,8 @@ import {
   emptyWorkspaceData,
   workspaceReducer,
 } from '../lib/workspaceReducer.js'
+
+const VALID_UNIT_PRESETS = new Set(UNIT_PRESET_OPTIONS.map((o) => o.id))
 
 export const TOOL = {
   FREEHAND: 'freehand',

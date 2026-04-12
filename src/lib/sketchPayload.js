@@ -16,7 +16,14 @@
 export function geometryFromSketchPayload(payload) {
   if (!payload || typeof payload !== 'object') return null
   if (payload.geometry && typeof payload.geometry === 'object') {
-    return payload.geometry
+    const base = { ...payload.geometry }
+    if (
+      base.desmosState == null &&
+      Object.prototype.hasOwnProperty.call(payload, 'desmosState')
+    ) {
+      base.desmosState = payload.desmosState ?? null
+    }
+    return base
   }
   return null
 }

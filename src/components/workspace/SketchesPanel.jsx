@@ -36,7 +36,7 @@ export function SketchesPanel({
     const geometry = JSON.parse(exportWorkspaceJson())
     addSketch(
       name.trim() || 'Sketch',
-      makeGearGenPayload('gearge-v1', geometry, { desmosState: null }),
+      makeGearGenPayload('gearge-v1', geometry),
     )
     onMessage?.(`Saved “${name.trim() || 'Sketch'}” to Sketches.`)
   }, [sketchIsExportable, exportWorkspaceJson, name, addSketch, onMessage])

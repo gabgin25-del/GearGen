@@ -95,7 +95,7 @@ export function AppShell() {
     const geometry = JSON.parse(scene.exportWorkspaceJson())
     addSketch(
       `Sketch ${new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
-      makeGearGenPayload('gearge-v1', geometry, { desmosState: null }),
+      makeGearGenPayload('gearge-v1', geometry),
     )
     toast.show(
       'Sketch saved — open the Saved Sketches tab to load or rename it.',
@@ -180,7 +180,11 @@ export function AppShell() {
                 {settingsMenu}
               </div>
             </header>
-            <DesmosMainView theme={theme} />
+            <DesmosMainView
+              theme={theme}
+              savedDesmosState={scene.workspaceData?.desmosState ?? null}
+              commit={scene.commit}
+            />
           </>
         ) : topChromeOpen ? (
           <>

@@ -11,6 +11,8 @@ export const emptyWorkspaceData = () => ({
   splines: [],
   constraints: [],
   dimensions: [],
+  /** @type {object | null} Serialized Desmos.GraphingCalculator.getState() */
+  desmosState: null,
 })
 
 export function cloneWorkspaceData(data) {
@@ -54,6 +56,10 @@ export function cloneWorkspaceData(data) {
     solverDiagnostics: data.solverDiagnostics
       ? { ...data.solverDiagnostics }
       : undefined,
+    desmosState:
+      data.desmosState != null
+        ? JSON.parse(JSON.stringify(data.desmosState))
+        : null,
   }
 }
 

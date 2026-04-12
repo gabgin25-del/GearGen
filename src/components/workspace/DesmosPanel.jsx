@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useDesmosBridge } from '../../hooks/useDesmosBridge.js'
 import { applyWorkspaceToDesmosCalculator } from '../../lib/desmosSketchBridge.js'
-import { convertDesmosToSketch } from '../../lib/convertDesmosToSketch.js'
+import { syncDesmosExpressionsToWorkspace } from '../../lib/desmosBridge.js'
 
 /**
  * Sidebar controls for the Desmos bridge (calculator instance lives in DesmosMainView).
@@ -23,22 +23,22 @@ export function DesmosPanel({
 }) {
   const { getCalculator } = useDesmosBridge()
 
-  const onExportToWorkspace = useCallback(async () => {
+  const onSyncToWorkspace = useCallback(async () => {
     const calc = getCalculator()
     if (!calc) {
       onMessage?.('Switch to the Desmos tab so the calculator is active.')
       return
     }
-    const n = await convertDesmosToSketch(calc, commit, nextId, {
+    const n = await syncDesmosExpressionsToWorkspace(calc, commit, nextId, {
       defaultFillRgba,
     })
     if (n > 0) {
       onMessage?.(
-        `Imported ${n} curve layer(s). Open the Drawing tab to edit the sketch.`,
+        `Synced ${n} curve layer(s) into the sketch. Open the Drawing tab to edit.`,
       )
     } else {
       onMessage?.(
-        'No graphable curves found. Add explicit y=f(x) or a numeric table.',
+        'No graphable curves found. Add y=f(x), r=g(\\theta), parametric (x(t),y(t)), a table, or an inequality.',
       )
     }
   }, [commit, nextId, defaultFillRgba, getCalculator, onMessage])
@@ -61,10 +61,10 @@ export function DesmosPanel({
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
       <button
         type="button"
-        onClick={onExportToWorkspace}
+        onClick={onSyncToWorkspace}
         className="rounded-md border border-gg-border bg-gg-sidebar-hover px-3 py-2 text-[12px] font-medium text-gg-text transition-colors hover:border-gg-accent/50 hover:text-gg-accent"
       >
-        Export to Workspace
+        Sync to Workspace
       </button>
       <button
         type="button"
