@@ -1,5 +1,6 @@
 import {
   FolderPlus,
+  FunctionSquare,
   MousePointer2,
   Redo2,
   Ruler,
@@ -22,6 +23,8 @@ export function WorkspaceToolbar({
   onRedo,
   canSaveSketch,
   onSaveSketch,
+  canSyncSketchToDesmos = false,
+  onSyncSketchToDesmos,
   showDrawingRibbon = false,
   ribbonSectionsOpen,
   onRibbonSectionToggle,
@@ -101,6 +104,17 @@ export function WorkspaceToolbar({
             className="flex size-9 shrink-0 items-center justify-center rounded-md text-gg-muted transition-colors enabled:hover:bg-gg-sidebar-hover enabled:hover:text-gg-text disabled:opacity-35"
           >
             <FolderPlus className="size-4" strokeWidth={1.75} />
+          </button>
+        ) : null}
+        {onSyncSketchToDesmos ? (
+          <button
+            type="button"
+            title="Sync to Desmos — piecewise parametric from first closed polygon (fully defined sketch)"
+            disabled={!canSyncSketchToDesmos}
+            onClick={onSyncSketchToDesmos}
+            className="flex size-9 shrink-0 items-center justify-center rounded-md text-gg-muted transition-colors enabled:hover:bg-gg-sidebar-hover enabled:hover:text-gg-accent disabled:opacity-35"
+          >
+            <FunctionSquare className="size-4" strokeWidth={1.75} />
           </button>
         ) : null}
         <button

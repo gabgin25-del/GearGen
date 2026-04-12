@@ -20,7 +20,12 @@ const SketchesContext = createContext(null)
  */
 function migrateStoredEntry(e) {
   if (!e || typeof e !== 'object') return null
-  if (e.payload && typeof e.payload === 'object') return e
+  if (e.payload && typeof e.payload === 'object') {
+    return {
+      ...e,
+      previewImage: e.previewImage ?? e.payload?.meta?.previewImage ?? null,
+    }
+  }
   if (e.data !== undefined) {
     return {
       id: e.id,
@@ -62,11 +67,17 @@ export function SketchesProvider({ children }) {
             desmosState: null,
           }
 
+    const previewImage =
+      payload && typeof payload === 'object' && 'previewImage' in payload
+        ? payload.previewImage ?? null
+        : null
+
     const entry = {
       id: uid(),
       name: (name && String(name).trim()) || 'Sketch',
       createdAt: new Date().toISOString(),
       payload: normalizedPayload,
+      previewImage,
     }
     setSketches((prev) => {
       const next = [entry, ...prev]

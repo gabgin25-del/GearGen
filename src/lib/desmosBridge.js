@@ -4,6 +4,8 @@
  * Segments use geoRegistered: true for GCS / fill / boolean compatibility.
  */
 
+import { emptyWorkspaceData } from './workspaceReducer.js'
+
 /** High-density sampling along each curve layer */
 export const DEFAULT_SAMPLE_COUNT = 256
 
@@ -535,4 +537,253 @@ export async function syncDesmosExpressionsToWorkspace(
 
   commit((d) => mergePolylinesIntoWorkspace(d, polylines, nextId, opts))
   return polylines.length
+}
+
+// --- Geometry listener: pixel → math, region hit-test, export to saved sketch ---
+
+/**
+ * @param {string} expr
+ * @param {number} mx
+ * @param {number} my
+ */
+function substituteXY(expr, mx, my) {
+  if (!expr || typeof expr !== 'string') return '0'
+  return expr
+    .replace(/(?<!\\)\bx\b/g, `{${mx}}`)
+    .replace(/(?<!\\)\by\b/g, `{${my}}`)
+}
+
+/**
+ * @param {object} calculator
+ * @param {string} latex original expression (may contain inequalities)
+ * @param {number} mx
+ * @param {number} my
+ */
+async function isInsideInequality(calculator, latex, mx, my) {
+  const L = latex.trim()
+  let m = L.match(/^([\s\S]+?)\\le([\s\S]+)$/)
+  if (!m) m = L.match(/^([\s\S]+?)\\leq([\s\S]+)$/)
+  if (m) {
+    const lhs = m[1].trim()
+    const rhs = m[2].trim()
+    const diff = `\\left(${rhs}\\right)-\\left(${lhs}\\right)`
+    const v = await helperNumeric(calculator, substituteXY(diff, mx, my))
+    return v != null && Number.isFinite(v) && v >= -1e-5
+  }
+  m = L.match(/^([\s\S]+?)\\ge([\s\S]+)$/)
+  if (!m) m = L.match(/^([\s\S]+?)\\geq([\s\S]+)$/)
+  if (m) {
+    const lhs = m[1].trim()
+    const rhs = m[2].trim()
+    const diff = `\\left(${lhs}\\right)-\\left(${rhs}\\right)`
+    const v = await helperNumeric(calculator, substituteXY(diff, mx, my))
+    return v != null && Number.isFinite(v) && v >= -1e-5
+  }
+  return false
+}
+
+/**
+ * @param {{ x: number; y: number }} pt
+ * @param {{ x: number; y: number }[]} poly
+ */
+function pointInPolygon(pt, poly) {
+  if (!poly || poly.length < 3) return false
+  const x = pt.x
+  const y = pt.y
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x
+    const yi = poly[i].y
+    const xj = poly[j].x
+    const yj = poly[j].y
+    const inter =
+      yi > y !== yj > y &&
+      x < ((xj - xi) * (y - yi)) / (yj - yi + 1e-30) + xi
+    if (inter) inside = !inside
+  }
+  return inside
+}
+
+/**
+ * Convert pixel coords (relative to calculator element) to math coords.
+ * @param {object} calculator
+ * @param {number} px
+ * @param {number} py
+ * @returns {{ x: number; y: number } | null}
+ */
+export function pixelsToMathCoords(calculator, px, py) {
+  try {
+    if (typeof calculator?.pixelsToMath === 'function') {
+      const o = calculator.pixelsToMath({ x: px, y: py })
+      if (
+        o &&
+        Number.isFinite(o.x) &&
+        Number.isFinite(o.y)
+      ) {
+        return { x: o.x, y: o.y }
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const b = calculator?.graphpaperBounds
+    const pix = b?.pixelCoordinates
+    const math = b?.mathCoordinates
+    if (
+      pix &&
+      math &&
+      Number.isFinite(pix.left) &&
+      Number.isFinite(pix.width) &&
+      pix.width > 1e-6 &&
+      Number.isFinite(pix.height) &&
+      pix.height > 1e-6
+    ) {
+      const lx = (px - pix.left) / pix.width
+      const ly = (py - pix.top) / pix.height
+      const mx = math.left + lx * (math.right - math.left)
+      const my = math.top - ly * (math.top - math.bottom)
+      if (Number.isFinite(mx) && Number.isFinite(my)) return { x: mx, y: my }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+/**
+ * Pick an expression whose filled region or closed loop contains (mx, my).
+ *
+ * @param {object} calculator
+ * @param {number} mx
+ * @param {number} my
+ * @returns {Promise<object | null>}
+ */
+export async function findRegionExpressionAtMath(calculator, mx, my) {
+  if (!calculator?.getExpressions || !Number.isFinite(mx) || !Number.isFinite(my))
+    return null
+
+  const bounds = getCalculatorMathBounds(calculator)
+  const sampleCount = Math.min(96, DEFAULT_SAMPLE_COUNT)
+  const exprs = getDrawableExpressions(calculator)
+
+  for (const ex of exprs) {
+    if (ex.type !== 'expression' || !ex.latex) continue
+    const latex = ex.latex
+    if (/\\le|\\leq|\\ge|\\geq|≤|≥/.test(latex)) {
+      const ok = await isInsideInequality(calculator, latex, mx, my)
+      if (ok) return ex
+      continue
+    }
+    const boundary = normalizeInequalityToBoundary(latex)
+    const pts = await sampleExpressionLatex(
+      calculator,
+      boundary,
+      bounds,
+      sampleCount,
+    )
+    if (pts && pts.length >= 3) {
+      const first = pts[0]
+      const last = pts[pts.length - 1]
+      const closed =
+        Math.hypot(first.x - last.x, first.y - last.y) <
+        Math.max(1e-2, 1e-4 * (Math.abs(first.x) + Math.abs(first.y) + 1))
+      if (closed && pointInPolygon({ x: mx, y: my }, pts)) return ex
+    }
+  }
+  return null
+}
+
+/**
+ * Sample one expression to a polyline (boundary).
+ *
+ * @param {object} calculator
+ * @param {object} expression Desmos expression entry
+ * @param {number} [sampleCount]
+ * @returns {Promise<{ x: number; y: number }[] | null>}
+ */
+export async function sampleExpressionToPolyline(
+  calculator,
+  expression,
+  sampleCount = DEFAULT_SAMPLE_COUNT,
+) {
+  if (expression?.type === 'table') {
+    const pl = polylinesFromTable(expression)
+    return pl[0] ?? null
+  }
+  if (expression?.type !== 'expression' || !expression.latex) return null
+  const bounds = getCalculatorMathBounds(calculator)
+  const pts = await sampleExpressionLatex(
+    calculator,
+    expression.latex,
+    bounds,
+    sampleCount,
+  )
+  return pts && pts.length >= 2 ? pts : null
+}
+
+/**
+ * Build sketch geometry + parametric entity for one Desmos expression region.
+ *
+ * @param {object} calculator
+ * @param {object} expression
+ * @param {(p: string) => string} nextId
+ * @param {{ defaultFillRgba?: string }} [opts]
+ * @returns {Promise<object | null>} workspace data snapshot (geometry fields only)
+ */
+export async function buildSketchFromDesmosExpression(
+  calculator,
+  expression,
+  nextId,
+  opts = {},
+) {
+  const base = emptyWorkspaceData()
+  const pts = await sampleExpressionToPolyline(calculator, expression)
+  if (!pts || pts.length < 2) return null
+  const merged = mergePolylinesIntoWorkspace(
+    base,
+    [pts],
+    nextId,
+    opts,
+  )
+  const peId = nextId('pentity')
+  merged.parametricEntities = [
+    ...(merged.parametricEntities ?? []),
+    {
+      id: peId,
+      source: 'desmos-region',
+      desmosExpressionId: expression.id,
+      boundaryLatex: normalizeInequalityToBoundary(expression.latex ?? ''),
+      originalLatex: expression.latex ?? '',
+    },
+  ]
+  let st = null
+  try {
+    st = calculator.getState?.() ?? null
+  } catch {
+    st = null
+  }
+  merged.desmosState = st
+  return merged
+}
+
+/**
+ * Capture graph thumbnail as data URL when supported.
+ * @param {object} calculator
+ * @returns {string | null}
+ */
+export function captureDesmosPreviewImage(calculator) {
+  try {
+    if (typeof calculator?.screenshot === 'function') {
+      const uri = calculator.screenshot({
+        width: 160,
+        height: 120,
+        targetPixelRatio: 1,
+      })
+      return typeof uri === 'string' ? uri : null
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
 }

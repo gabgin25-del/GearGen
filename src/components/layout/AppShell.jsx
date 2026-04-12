@@ -22,6 +22,8 @@ import { WorkspaceCanvas } from '../workspace/WorkspaceCanvas.jsx'
 import { WorkspaceSettingsMenu } from '../workspace/WorkspaceSettingsMenu.jsx'
 import { WorkspaceToolbar } from '../workspace/WorkspaceToolbar.jsx'
 import { makeGearGenPayload } from '../../lib/sketchPayload.js'
+import { useDesmosBridge } from '../../hooks/useDesmosBridge.js'
+import { injectPolygonSketchIntoDesmosCalculator } from '../../lib/sketchToLatex.js'
 import { TOOL, useWorkspaceScene } from '../../hooks/useWorkspaceScene.js'
 import { Sidebar } from './Sidebar.jsx'
 import { NAV_IDS } from './sidebarNav.js'
@@ -57,6 +59,7 @@ function clampPolarDeg(n) {
 export function AppShell() {
   const toast = useToast()
   const { addSketch } = useSketches()
+  const { getCalculator } = useDesmosBridge()
   const scene = useWorkspaceScene({ onSketchMessage: toast.show })
   const { theme, toggleTheme } = useTheme()
   const [topChromeOpen, setTopChromeOpen] = useState(true)
@@ -72,6 +75,32 @@ export function AppShell() {
           ? 'Saved Sketches'
           : 'Gear Making'
   const isDesmosTab = sidebarTab === NAV_IDS.desmos
+
+  const canSyncSketchToDesmos =
+    scene.workspaceData?.solverDiagnostics?.engine === 'planegcs' &&
+    scene.workspaceData?.solverDiagnostics?.fullyDefined === true &&
+    scene.workspaceData?.solverDiagnostics?.solveFailed !== true
+
+  const handleSyncSketchToDesmos = useCallback(() => {
+    const calc = getCalculator()
+    if (!calc) {
+      toast.show(
+        'Calculator is initializing — switch to the Desmos tab briefly, then try again.',
+      )
+      return
+    }
+    const ok = injectPolygonSketchIntoDesmosCalculator(
+      calc,
+      scene.workspaceData ?? {},
+    )
+    if (ok) {
+      toast.show('Piecewise sketch curve added to Desmos.')
+      return
+    }
+    toast.show(
+      'Need a fully defined closed polygon region to build a parametric in Desmos.',
+    )
+  }, [getCalculator, scene.workspaceData, toast])
 
   const handleToolChange = useCallback(
     (id) => {
@@ -132,61 +161,34 @@ export function AppShell() {
             onMessage={toast.show}
           />
         }
-        desmosPanel={
-          <DesmosPanel
-            workspaceData={scene.workspaceData}
+        desmosPanel={<DesmosPanel />}
+        gearMakingPanel={<GearMakingPanel />}
+      />
+      <main
+        className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${isDesmosTab ? 'p-0' : 'p-4'}`}
+      >
+        <div
+          className={
+            isDesmosTab
+              ? 'relative z-10 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
+              : 'pointer-events-none fixed left-[130vw] top-0 z-0 h-[420px] w-[680px] overflow-hidden opacity-0'
+          }
+          aria-hidden={!isDesmosTab}
+        >
+          <DesmosMainView
+            theme={theme}
+            savedDesmosState={scene.workspaceData?.desmosState ?? null}
             commit={scene.commit}
+            desmosVisible={isDesmosTab}
+            addSketch={addSketch}
             nextId={scene.nextId}
             defaultFillRgba={scene.shapeStyle.shapeFillRgba}
             onMessage={toast.show}
           />
-        }
-        gearMakingPanel={<GearMakingPanel />}
-      />
-      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col p-4">
-        {isDesmosTab ? (
+        </div>
+        {!isDesmosTab ? (
           <>
-            <header className="mb-2 flex shrink-0 items-start justify-between gap-2">
-              <div className="min-w-0">
-                <h1 className="text-[15px] font-medium tracking-tight text-gg-text">
-                  {mainTitle}
-                </h1>
-              </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                <a
-                  href="#help"
-                  className="flex size-9 shrink-0 items-center justify-center rounded-md border border-gg-border text-gg-muted transition-colors hover:border-gg-accent/50 hover:text-gg-text"
-                  title="Help: splines and tools"
-                  aria-label="Open help page (splines)"
-                >
-                  <CircleHelp className="size-4" strokeWidth={2} aria-hidden />
-                </a>
-                <button
-                  type="button"
-                  onClick={toggleTheme}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-md border border-gg-border text-gg-muted transition-colors hover:border-gg-accent/50 hover:text-gg-text"
-                  aria-label={
-                    theme === 'dark'
-                      ? 'Switch to light mode'
-                      : 'Switch to dark mode'
-                  }
-                >
-                  {theme === 'dark' ? (
-                    <Sun className="size-4" strokeWidth={2} aria-hidden />
-                  ) : (
-                    <Moon className="size-4" strokeWidth={2} aria-hidden />
-                  )}
-                </button>
-                {settingsMenu}
-              </div>
-            </header>
-            <DesmosMainView
-              theme={theme}
-              savedDesmosState={scene.workspaceData?.desmosState ?? null}
-              commit={scene.commit}
-            />
-          </>
-        ) : topChromeOpen ? (
+            {topChromeOpen ? (
           <>
             <header className="mb-1 flex shrink-0 items-start justify-between gap-2">
               <div className="min-w-0">
@@ -242,6 +244,8 @@ export function AppShell() {
               onRedo={scene.redo}
               canSaveSketch={scene.canSaveSketch}
               onSaveSketch={handleSaveSketch}
+              canSyncSketchToDesmos={canSyncSketchToDesmos}
+              onSyncSketchToDesmos={handleSyncSketchToDesmos}
               showDrawingRibbon={sidebarTab === NAV_IDS.drawing}
               ribbonSectionsOpen={scene.ribbonSectionsOpen}
               onRibbonSectionToggle={scene.toggleRibbonSection}
@@ -350,8 +354,6 @@ export function AppShell() {
             </button>
           </div>
         )}
-        {!isDesmosTab ? (
-          <>
             {scene.workspaceData?.solverDiagnostics?.engine === 'planegcs' &&
             scene.workspaceData.solverDiagnostics.overConstrained ? (
               <div

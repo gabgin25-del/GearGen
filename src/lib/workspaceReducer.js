@@ -13,6 +13,8 @@ export const emptyWorkspaceData = () => ({
   dimensions: [],
   /** @type {object | null} Serialized Desmos.GraphingCalculator.getState() */
   desmosState: null,
+  /** @type {{ id: string; boundaryLatex?: string; originalLatex?: string; desmosExpressionId?: string; source?: string }[]} */
+  parametricEntities: [],
 })
 
 export function cloneWorkspaceData(data) {
@@ -60,6 +62,7 @@ export function cloneWorkspaceData(data) {
       data.desmosState != null
         ? JSON.parse(JSON.stringify(data.desmosState))
         : null,
+    parametricEntities: (data.parametricEntities ?? []).map((e) => ({ ...e })),
   }
 }
 

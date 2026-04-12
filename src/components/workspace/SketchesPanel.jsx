@@ -134,6 +134,18 @@ export function SketchesPanel({
                 key={e.id}
                 className="flex items-center gap-2 px-2 py-2 hover:bg-white/[0.04]"
               >
+                {e.previewImage ? (
+                  <img
+                    src={e.previewImage}
+                    alt=""
+                    className="size-10 shrink-0 rounded border border-gg-border/60 bg-gg-workspace object-contain"
+                  />
+                ) : (
+                  <div
+                    className="size-10 shrink-0 rounded border border-gg-border/40 bg-gg-workspace/40"
+                    aria-hidden
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => handleLoad(e.id)}
