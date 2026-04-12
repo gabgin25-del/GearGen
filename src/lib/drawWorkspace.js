@@ -1102,7 +1102,6 @@ export function drawWorkspaceScene(ctx, p) {
           rc = circleWithResolvedCenter(arc ?? c, pointById)
         }
         if (!rc || rc.r < 1e-9) continue
-        const isArc = !!arc
         const isCirc = !!c && !arc
         const label =
           v != null && Number.isFinite(v)

@@ -280,7 +280,10 @@ export function useWorkspaceScene(options = {}) {
   const [selectedShape, setSelectedShape] = useState(null)
 
   const [arcMode, setArcModeState] = useState(ARC_MODE.CENTER)
-  const [splineType, setSplineType] = useState('catmullRom')
+  const [splineType, setSplineTypeRaw] = useState('catmullRom')
+  const setSplineType = useCallback((t) => {
+    setSplineTypeRaw(t === 'polyline' ? 'catmullRom' : t)
+  }, [])
   const [splineTension, setSplineTension] = useState(0.5)
   const [splineClosed, setSplineClosed] = useState(false)
   const [splineSegmentsPerSpan, setSplineSegmentsPerSpan] = useState(14)
@@ -634,14 +637,6 @@ export function useWorkspaceScene(options = {}) {
     setPreview(null)
     setArcModeState(mode)
   }, [])
-
-  useEffect(() => {
-    if (splineType === 'polyline') setSplineType('catmullRom')
-  }, [splineType])
-
-  useEffect(() => {
-    if (tool !== TOOL.SPLINE) setSplinePanelOpen(true)
-  }, [tool])
 
   const toggleRibbonSection = useCallback((key) => {
     setRibbonSectionsOpen((prev) => ({ ...prev, [key]: !prev[key] }))

@@ -82,7 +82,6 @@ export function drawLinearDimension(ctx, o) {
   ctx.lineJoin = 'round'
 
   if (projection === 'horizontal') {
-    const mx = (ax + bx) / 2
     const my = (ay + by) / 2
     const yDim = my + offsetWorld
     const syA = Math.sign(yDim - ay) || 1
@@ -151,7 +150,6 @@ export function drawLinearDimension(ctx, o) {
 
   if (projection === 'vertical') {
     const mx = (ax + bx) / 2
-    const my = (ay + by) / 2
     const xDim = mx + offsetWorld
     const sxA = Math.sign(xDim - ax) || 1
     const sxB = Math.sign(xDim - bx) || 1
@@ -345,7 +343,6 @@ export function drawRadialDimension(ctx, o) {
   const { cx, cy, r, zoom, label, theme = 'dark', leaderAngle = 0 } = o
   const z = zoom || 1
   if (r < 1e-6) return
-  const gap = ANSI_EXT_GAP_WORLD
   const dimTint =
     theme === 'light' ? 'rgba(30, 41, 59, 0.92)' : 'rgba(226, 232, 240, 0.92)'
   const extTint =

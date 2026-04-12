@@ -3,11 +3,7 @@ import {
   linearDimensionOffsetForProjection,
   linearDistanceValueForProjection,
 } from './dimensionGeometry.js'
-import {
-  DEFAULT_DOCUMENT_UNITS,
-  formatLengthMmForDisplay,
-  worldMmToDisplay,
-} from './sketchUnits.js'
+import { DEFAULT_DOCUMENT_UNITS, worldMmToDisplay } from './sketchUnits.js'
 
 /**
  * Commit a driving dimension from placement draft and open the value editor.

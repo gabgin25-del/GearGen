@@ -23,6 +23,7 @@ import { WorkspaceToolbar } from '../workspace/WorkspaceToolbar.jsx'
 import { makeGearGenPayload } from '../../lib/sketchPayload.js'
 import { TOOL, useWorkspaceScene } from '../../hooks/useWorkspaceScene.js'
 import { Sidebar } from './Sidebar.jsx'
+import { NAV_IDS } from './sidebarNav.js'
 
 const TOOL_LABEL = {
   [TOOL.SELECT]: 'Selection',
@@ -68,6 +69,9 @@ export function AppShell() {
         scene.setSplinePanelOpen((o) => !o)
         return
       }
+      if (id !== TOOL.SPLINE) {
+        scene.setSplinePanelOpen(true)
+      }
       scene.setTool(id)
     },
     [scene],
@@ -103,27 +107,8 @@ export function AppShell() {
         onTabChange={setSidebarTab}
         drawingPanel={
           <DrawingToolsPanel
-            tool={scene.tool}
-            onToolChange={handleToolChange}
             ribbonSectionsOpen={scene.ribbonSectionsOpen}
             onRibbonSectionToggle={scene.toggleRibbonSection}
-            presetNgonSides={scene.presetNgonSides}
-            onPresetNgonSidesChange={scene.setPresetNgonSides}
-            sketchSelection={scene.sketchSelection}
-            applySketchRelation={scene.applySketchRelation}
-            arcMode={scene.arcMode}
-            onArcModeChange={scene.setArcMode}
-            splineType={scene.splineType}
-            onSplineTypeChange={scene.setSplineType}
-            splineTension={scene.splineTension}
-            onSplineTensionChange={scene.setSplineTension}
-            splineClosed={scene.splineClosed}
-            onSplineClosedChange={scene.setSplineClosed}
-            splineSegmentsPerSpan={scene.splineSegmentsPerSpan}
-            onSplineSegmentsPerSpanChange={scene.setSplineSegmentsPerSpan}
-            splinePanelOpen={scene.splinePanelOpen}
-            cutMode={scene.cutMode}
-            onCutModeChange={scene.setCutMode}
             registeredShapesSlot={
               <RegisteredShapesPanel workspaceData={scene.workspaceData} />
             }
@@ -137,7 +122,7 @@ export function AppShell() {
             onMessage={toast.show}
           />
         }
-        desmosPanel={<DesmosPanel />}
+        desmosPanel={<DesmosPanel workspaceData={scene.workspaceData} />}
         gearMakingPanel={<GearMakingPanel />}
       />
       <main className="relative flex min-h-0 min-w-0 flex-1 flex-col p-4">
@@ -197,6 +182,26 @@ export function AppShell() {
               onRedo={scene.redo}
               canSaveSketch={scene.canSaveSketch}
               onSaveSketch={handleSaveSketch}
+              showDrawingRibbon={sidebarTab === NAV_IDS.drawing}
+              ribbonSectionsOpen={scene.ribbonSectionsOpen}
+              onRibbonSectionToggle={scene.toggleRibbonSection}
+              presetNgonSides={scene.presetNgonSides}
+              onPresetNgonSidesChange={scene.setPresetNgonSides}
+              sketchSelection={scene.sketchSelection}
+              applySketchRelation={scene.applySketchRelation}
+              arcMode={scene.arcMode}
+              onArcModeChange={scene.setArcMode}
+              splineType={scene.splineType}
+              onSplineTypeChange={scene.setSplineType}
+              splineTension={scene.splineTension}
+              onSplineTensionChange={scene.setSplineTension}
+              splineClosed={scene.splineClosed}
+              onSplineClosedChange={scene.setSplineClosed}
+              splineSegmentsPerSpan={scene.splineSegmentsPerSpan}
+              onSplineSegmentsPerSpanChange={scene.setSplineSegmentsPerSpan}
+              splinePanelOpen={scene.splinePanelOpen}
+              cutMode={scene.cutMode}
+              onCutModeChange={scene.setCutMode}
             />
           </>
         ) : (

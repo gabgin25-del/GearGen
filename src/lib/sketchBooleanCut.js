@@ -277,7 +277,7 @@ export function trySubtractRectFromFill(data, rect, nextId, opts = {}) {
     const rc = circleWithResolvedCenter(c, pmap)
     if (rc.r < 1e-9) continue
     if (!pointInPolygon(cx, cy, approxCircleVerts(rc.cx, rc.cy, rc.r))) continue
-    return subtractRectFromFilledCircle(d, c.id, rect, nextId)
+    return subtractRectFromFilledCircle(d, c.id, rect)
   }
   return null
 }
@@ -295,7 +295,7 @@ function approxCircleVerts(cx, cy, r) {
 /**
  * Approximate rectangular cut on a disk using a clip polygon (boolean-style).
  */
-function subtractRectFromFilledCircle(data, circleId, rect, nextId) {
+function subtractRectFromFilledCircle(data, circleId, rect) {
   const pmap = new Map((data.points ?? []).map((p) => [p.id, p]))
   const c = data.circles.find((x) => x.id === circleId)
   if (!c) return null

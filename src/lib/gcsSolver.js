@@ -52,10 +52,9 @@ function solveSymmetric(A, b) {
 /**
  * @param {object} data
  * @param {Map<string, number>} idx point id -> flat index (2*i for x)
- * @param {number} nv
  * @returns {{ r: number[]; rows: { idx: number; val: number }[][] }}
  */
-function buildSystem(data, idx, nv) {
+function buildSystem(data, idx) {
   const r = []
   /** @type {{ idx: number; val: number }[][]} */
   const rows = []
@@ -328,7 +327,7 @@ function normR(r) {
   return Math.sqrt(s)
 }
 
-function applyDelta(d, delta, pointIds) {
+function applyDelta(d, delta) {
   const pts = d.points.map((p, i) => {
     const ix = 2 * i
     let nx = p.x + delta[ix]
@@ -384,7 +383,7 @@ function solveLegacyGCS(data, opts = {}) {
   let lambda = LAMBDA0
 
   for (let iter = 0; iter < maxIter; iter++) {
-    const { r, rows } = buildSystem(d, idx, nv)
+    const { r, rows } = buildSystem(d, idx)
     if (r.length === 0) break
 
     const nr = normR(r)
@@ -420,8 +419,8 @@ function solveLegacyGCS(data, opts = {}) {
       }
     }
 
-    const trial = applyDelta(d, delta, pointIds)
-    const nrTrial = normR(buildSystem(trial, idx, nv).r)
+    const trial = applyDelta(d, delta)
+    const nrTrial = normR(buildSystem(trial, idx).r)
 
     if (nrTrial < nr) {
       d = trial

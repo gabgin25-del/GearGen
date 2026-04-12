@@ -20,9 +20,12 @@ function DrivingDimensionValueInput({
 
   const [draft, setDraft] = useState(committedStr)
 
+  /* Sync external committed value into the input when the dimension or stored value changes. */
+  /* eslint-disable react-hooks/set-state-in-effect -- controlled reset when dim.id / committedStr updates */
   useEffect(() => {
     setDraft(committedStr)
   }, [dim.id, committedStr])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const sanitize = (raw) => {
     if (dim.type === 'angle') {

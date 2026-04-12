@@ -5,6 +5,8 @@ const STORAGE_PREFIX = 'geargen-gear-making-'
 
 /**
  * Mechanical gear synthesis parameters and envelope generation entry point.
+ * Tooth count, module, and pressure angle are retained for future overlay on
+ * envelope curves produced by equation synthesis (involute / rack forms).
  */
 function readGearMakingInitial() {
   try {

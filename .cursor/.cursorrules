@@ -1,0 +1,21 @@
+# GearGen Project Intelligence & Drafting Standards
+
+## Architecture Context
+- **Framework**: React/Vite.
+- **Core Engine**: PlaneGCS (WASM) for geometric constraint solving.
+- **Boolean Model**: First-class `isCut` property on shapes (Circles, Polygons, Splines).
+
+## Drafting Standards (ANSI Y14.5)
+- **Arrowheads**: Filled, strictly 3:1 length-to-width ratio.
+- **Extensions**: 1.5mm gap from vertex; 3mm overhang past dimension line.
+- **Leaders**: Horizontal shoulder (min 6mm) before label for Radii/Diameter.
+
+## GCS & Geometry Logic
+- **Warm Start**: Before solving, seed PlaneGCS with current (x, y) coordinates from `data.points` to prevent "flipping."
+- **360° Arcs**: Use [0, 2π] range for sweeps. Avoid clamping to [-π, π].
+- **Perpendiculars**: Render 90° corner boxes on the "inside" of the angle, oriented along the bisector.
+- **Midpoints**: Constrain mathematically to (P1+P2)/2 and ensure collinearity to the parent segment.
+
+## Component Style
+- **Naming**: Use descriptive camelCase (e.g., `isCutShape`, `hasGeometryError`).
+- **Boolean Cuts**: Cut objects must be selectable/constrainable. Use `rgba(239, 68, 68, 0.4)` fill and dashed red strokes for rendering.
